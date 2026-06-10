@@ -17,7 +17,9 @@ var T = {
   DROLE: 'SIPI_DataRoles',
   DANO: 'SIPI_DataAnomalies',
   TRAIN: 'SIPI_Training',
-  PROC: 'SIPI_Processes'
+  PROC: 'SIPI_Processes',
+  REF: 'SIPI_Referents',
+  USERINFO: 'SIPI_UserInfo'
 };
 
 // =============================================================================
@@ -28,7 +30,7 @@ var I18N = {
   fr: {
     appTitle: 'Cockpit de pilotage projet SI', appSubtitle: 'Pilotage exigences, risques, données, gouvernance, formation',
     tabDashboard: 'Tableau de bord', tabRequirements: 'Exigences', tabRoadmap: 'Feuille de route', tabRisks: 'Risques',
-    tabGovernance: 'RACI & Gouvernance', tabData: 'Qualité données', tabTraining: 'Formation', tabProcesses: 'Processus',
+    tabGovernance: 'RACI & Gouvernance', tabData: 'Qualité données', tabTraining: 'Formation', tabProcesses: 'Processus', tabReferents: 'Référents',
     add: 'Ajouter', edit: 'Modifier', del: 'Supprimer', save: 'Enregistrer', cancel: 'Annuler', close: 'Fermer',
     confirmDelete: 'Confirmer la suppression ?', saved: 'Enregistré ✓', deleted: 'Supprimé ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
     comingSoon: 'Module en cours de développement', noData: 'Aucune donnée pour le moment',
@@ -43,7 +45,7 @@ var I18N = {
   en: {
     appTitle: 'IT Project Cockpit', appSubtitle: 'Requirements, risks, data, governance, training',
     tabDashboard: 'Dashboard', tabRequirements: 'Requirements', tabRoadmap: 'Roadmap', tabRisks: 'Risks',
-    tabGovernance: 'RACI & Governance', tabData: 'Data quality', tabTraining: 'Training', tabProcesses: 'Processes',
+    tabGovernance: 'RACI & Governance', tabData: 'Data quality', tabTraining: 'Training', tabProcesses: 'Processes', tabReferents: 'Referents',
     add: 'Add', edit: 'Edit', del: 'Delete', save: 'Save', cancel: 'Cancel', close: 'Close',
     confirmDelete: 'Confirm deletion?', saved: 'Saved ✓', deleted: 'Deleted ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
     comingSoon: 'Module under development', noData: 'No data yet',
@@ -60,7 +62,7 @@ function setLang(l) {
   document.getElementById('lang-fr').classList.toggle('active', l === 'fr');
   document.getElementById('lang-en').classList.toggle('active', l === 'en');
   applyI18n();
-  renderCurrentTab();
+  if (isEditor && !isOwner) renderContributorMode(); else renderCurrentTab();
 }
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(function(el) { el.textContent = t(el.getAttribute('data-i18n')); });
@@ -69,8 +71,10 @@ function applyI18n() {
 // =============================================================================
 // DATA
 // =============================================================================
-var data = { req: [], phase: [], risk: [], raci: [], inst: [], dec: [], dq: [], drole: [], dano: [], train: [], proc: [] };
-var canEdit = false;
+var data = { req: [], phase: [], risk: [], raci: [], inst: [], dec: [], dq: [], drole: [], dano: [], train: [], proc: [], ref: [] };
+var canEdit = false;            // true pour l'Owner (cockpit complet)
+var isOwner = false, isEditor = false, currentUserEmail = '';
+var myReferent = null;          // ligne SIPI_Referents correspondant à l'utilisateur courant
 
 function sanitize(s) {
   if (s === null || s === undefined) return '';
@@ -161,7 +165,8 @@ async function ensureTables() {
     [T.DROLE, [{ id: 'Role', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Data Owner', 'Data Steward', 'Data Producer', 'Data Manager', 'Data Architect'] }) }, { id: 'Person', type: 'Text' }, { id: 'Perimeter', type: 'Text' }]],
     [T.DANO, [{ id: 'Description', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Dimension', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Complétude', 'Exactitude', 'Cohérence', 'Actualité', 'Traçabilité'] }) }, { id: 'Severity', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['faible', 'moyenne', 'forte'] }) }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['ouverte', 'corrigée'] }) }, { id: 'Detected_At', type: 'Date' }]],
     [T.TRAIN, [{ id: 'Session', type: 'Text' }, { id: 'Profile', type: 'Text' }, { id: 'Wave', type: 'Text' }, { id: 'Date', type: 'Date' }, { id: 'Duration', type: 'Text' }, { id: 'Trainer', type: 'Text' }, { id: 'Capacity', type: 'Int' }, { id: 'Attendees', type: 'Int' }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['planifiée', 'réalisée', 'annulée'] }) }]],
-    [T.PROC, [{ id: 'Name', type: 'Text' }, { id: 'Context', type: 'Text' }, { id: 'AsIs', type: 'Text' }, { id: 'ToBe', type: 'Text' }, { id: 'PainPoints', type: 'Text' }, { id: 'Gains', type: 'Text' }, { id: 'ConfigRequired', type: 'Text' }, { id: 'IntegrationStatus', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à analyser', 'en cours', 'intégré'] }) }]]
+    [T.PROC, [{ id: 'Name', type: 'Text' }, { id: 'Context', type: 'Text' }, { id: 'AsIs', type: 'Text' }, { id: 'ToBe', type: 'Text' }, { id: 'PainPoints', type: 'Text' }, { id: 'Gains', type: 'Text' }, { id: 'ConfigRequired', type: 'Text' }, { id: 'IntegrationStatus', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à analyser', 'en cours', 'intégré'] }) }]],
+    [T.REF, [{ id: 'Email', type: 'Text' }, { id: 'Name', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Domain', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'] }) }]]
   ];
   for (var i = 0; i < defs.length; i++) {
     if (existing.indexOf(defs[i][0]) === -1) {
@@ -198,7 +203,10 @@ async function loadAll() {
   data.dano = await fetchAll(T.DANO);
   data.train = await fetchAll(T.TRAIN);
   data.proc = await fetchAll(T.PROC);
-  renderCurrentTab();
+  data.ref = await fetchAll(T.REF);
+  resolveMyReferent();
+  if (isEditor && !isOwner) renderContributorMode();
+  else renderCurrentTab();
 }
 
 // =============================================================================
@@ -213,7 +221,7 @@ function switchTab(tab) {
 }
 function renderCurrentTab() {
   var r = { dashboard: renderDashboard, requirements: renderRequirements, roadmap: renderRoadmap, risks: renderRisks,
-    governance: renderGovernance, data: renderData, training: renderTraining, processes: renderProcesses };
+    governance: renderGovernance, data: renderData, training: renderTraining, processes: renderProcesses, referents: renderReferents };
   if (r[currentTab]) r[currentTab]();
 }
 function placeholder(viewId, icon, label) {
@@ -810,6 +818,160 @@ async function saveProc(id) {
 }
 
 // =============================================================================
+// RÉFÉRENTS (Owner) — mapping email → périmètre → domaine
+// =============================================================================
+function renderReferents() {
+  var L = currentLang === 'fr';
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>👤 ' + (L ? 'Référents métiers' : 'Business referents') + ' <span class="section-subtitle">' + (L ? 'rattachez chaque référent (email Grist) à son périmètre et domaine' : 'map each referent (Grist email) to scope and domain') + '</span></span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openRefModal()">+ ' + (L ? 'Référent' : 'Referent') + '</button>';
+  html += '</div>';
+  html += '<p style="font-size:12px;color:#64748b;margin-bottom:12px;">' + (L ? 'Les référents (accès <strong>Editor</strong> au document) ouvrent automatiquement un <strong>mode contributeur</strong> limité à leur périmètre : qualité de leurs données, anomalies, validation des exigences de leur domaine, présences de leurs formations. Tout remonte dans votre cockpit.' : 'Referents (Editor access) get a contributor mode scoped to their perimeter.') + '</p>';
+  if (currentUserEmail) html += '<p style="font-size:11px;color:#94a3b8;margin-bottom:12px;">' + (L ? 'Votre email détecté :' : 'Your detected email:') + ' <strong>' + sanitize(currentUserEmail) + '</strong></p>';
+  if (!data.ref.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Email' : 'Email') + '</th><th>' + (L ? 'Nom' : 'Name') + '</th><th>' + (L ? 'Périmètre' : 'Scope') + '</th><th>' + (L ? 'Domaine' : 'Domain') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.ref.forEach(function(r) {
+      html += '<tr><td><strong>' + sanitize(r.Email || '') + '</strong></td><td>' + sanitize(r.Name || '') + '</td><td>' + sanitize(r.Perimeter || '') + '</td><td><span class="badge badge-could">' + sanitize(r.Domain || '') + '</span></td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openRefModal(' + r.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.REF + '\',' + r.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-referents').innerHTML = html;
+}
+function openRefModal(id) {
+  if (!canEdit) return;
+  var r = id ? data.ref.find(function(x) { return x.id === id; }) : {};
+  var L = currentLang === 'fr';
+  var domains = ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'];
+  var perimeters = data.dq.map(function(d) { return d.Perimeter; }).filter(Boolean);
+  var b = '<div class="form-group"><label>' + (L ? 'Email Grist du référent' : 'Referent Grist email') + '</label><input id="rf-email" value="' + sanitize(r.Email || '') + '" placeholder="prenom.nom@grandlyon.com"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Nom' : 'Name') + '</label><input id="rf-name" value="' + sanitize(r.Name || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Périmètre (direction)' : 'Scope') + '</label><input id="rf-per" list="rf-per-list" value="' + sanitize(r.Perimeter || '') + '"><datalist id="rf-per-list">' + perimeters.map(function(p) { return '<option value="' + sanitize(p) + '">'; }).join('') + '</datalist></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Domaine d\'exigences validé' : 'Validated requirement domain') + '</label><select id="rf-domain">' + domains.map(function(d) { return '<option' + (r.Domain === d ? ' selected' : '') + '>' + d + '</option>'; }).join('') + '</select></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.REF + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveRef(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(L ? 'Référent métier' : 'Business referent', b, f);
+}
+async function saveRef(id) {
+  var rec = { Email: document.getElementById('rf-email').value.trim(), Name: document.getElementById('rf-name').value.trim(), Perimeter: document.getElementById('rf-per').value.trim(), Domain: document.getElementById('rf-domain').value };
+  if (!rec.Email) { showToast(currentLang === 'fr' ? 'Email requis' : 'Email required', 'error'); return; }
+  await saveRow(T.REF, id, rec);
+}
+
+// =============================================================================
+// MODE CONTRIBUTEUR (Editor) — saisie cadrée sur le périmètre du référent
+// =============================================================================
+function renderContributorMode() {
+  var L = currentLang === 'fr';
+  // bascule d'affichage : on masque le cockpit, on montre la vue contributeur
+  document.getElementById('tabs').classList.add('hidden');
+  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); c.classList.add('hidden'); });
+  var cv = document.getElementById('contributor-view');
+  cv.classList.remove('hidden');
+  var sub = document.querySelector('.app-header-left p'); if (sub) sub.textContent = L ? 'Mode contributeur — saisie de vos informations métier' : 'Contributor mode — submit your business data';
+  var ee = document.getElementById('btn-export-excel'), ep = document.getElementById('btn-export-pdf');
+  if (ee) ee.classList.add('hidden'); if (ep) ep.classList.add('hidden');
+
+  if (!myReferent) {
+    cv.innerHTML = '<div class="tab-content active" style="display:block;"><div class="section-card"><div class="empty-hint"><div style="font-size:42px;">🔒</div><h3 style="color:#475569;margin:8px 0;">' + (L ? 'Compte non rattaché' : 'Account not linked') + '</h3><p>' + (L ? 'Votre email <strong>' + sanitize(currentUserEmail || '(inconnu)') + '</strong> n\'est rattaché à aucun périmètre.<br>Communiquez-le au chef de projet pour être ajouté comme référent.' : 'Your email is not linked to any scope. Contact the project manager.') + '</p></div></div></div>';
+    return;
+  }
+
+  var per = myReferent.Perimeter, dom = myReferent.Domain;
+  var html = '<div style="padding:22px;">';
+  html += '<div class="section-card" style="border-left:4px solid #4f46e5;"><div style="font-size:13px;color:#64748b;">' + (L ? 'Bienvenue' : 'Welcome') + ' <strong>' + sanitize(myReferent.Name || currentUserEmail) + '</strong></div><div style="font-size:18px;font-weight:800;color:#312e81;">' + (L ? 'Périmètre :' : 'Scope:') + ' ' + sanitize(per) + ' <span class="badge badge-could">' + sanitize(dom) + '</span></div></div>';
+
+  // 1) Qualité de mes données
+  var myDq = data.dq.find(function(d) { return (d.Perimeter || '') === per; });
+  html += '<div class="section-card"><div class="section-title">🧬 ' + (L ? 'Qualité de mes données' : 'My data quality') + '</div>';
+  html += '<p style="font-size:12px;color:#64748b;margin-bottom:10px;">' + (L ? 'Renseignez les 5 dimensions pour votre périmètre.' : 'Fill the 5 dimensions for your scope.') + '</p>';
+  html += '<div class="form-row">';
+  html += '<div class="form-group"><label>' + (L ? 'Complétude %' : 'Completeness %') + '</label>' + numInput('cb-comp', myDq ? myDq.Completeness : undefined) + '</div>';
+  html += '<div class="form-group"><label>' + (L ? 'Exactitude %' : 'Accuracy %') + '</label>' + numInput('cb-acc', myDq ? myDq.Accuracy : undefined) + '</div>';
+  html += '<div class="form-group"><label>' + (L ? 'Cohérence %' : 'Consistency %') + '</label>' + numInput('cb-cons', myDq ? myDq.Consistency : undefined) + '</div>';
+  html += '<div class="form-group"><label>' + (L ? 'Traçabilité %' : 'Traceability %') + '</label>' + numInput('cb-trac', myDq ? myDq.Traceability : undefined) + '</div>';
+  html += '<div class="form-group"><label>' + (L ? 'Actualité (jours)' : 'Freshness (days)') + '</label><input type="number" min="0" id="cb-fresh" value="' + (myDq && typeof myDq.Freshness === 'number' ? myDq.Freshness : '') + '"></div>';
+  html += '</div><button class="btn btn-primary btn-sm" onclick="contribSaveDq(' + (myDq ? myDq.id : 'null') + ')">💾 ' + t('save') + '</button></div>';
+
+  // 2) Mes anomalies
+  var myAno = data.dano.filter(function(d) { return (d.Perimeter || '') === per; });
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🐞 ' + (L ? 'Mes anomalies' : 'My anomalies') + '</span><button class="btn btn-primary btn-sm" onclick="contribAddAnomaly()">+ ' + (L ? 'Signaler' : 'Report') + '</button></div>';
+  if (!myAno.length) html += '<div class="empty-hint">' + (L ? 'Aucune anomalie signalée' : 'No anomaly reported') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Description' : 'Description') + '</th><th>Dimension</th><th>' + (L ? 'Sévérité' : 'Severity') + '</th><th>' + (L ? 'Statut' : 'Status') + '</th><th></th></tr></thead><tbody>';
+    myAno.forEach(function(d) {
+      var sevCls = d.Severity === 'forte' ? 'badge-must' : d.Severity === 'moyenne' ? 'badge-should' : 'badge-wont';
+      html += '<tr><td><strong>' + sanitize(d.Description || '') + '</strong></td><td>' + sanitize(d.Dimension || '') + '</td><td><span class="badge ' + sevCls + '">' + sanitize(d.Severity || '') + '</span></td><td>' + sanitize(d.Status || '') + '</td>';
+      html += '<td>' + (d.Status === 'ouverte' ? '<button class="btn btn-secondary btn-sm" onclick="contribResolveAnomaly(' + d.id + ')">✓ ' + (L ? 'Corrigée' : 'Resolved') + '</button>' : '') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // 3) Exigences de mon domaine
+  var myReq = data.req.filter(function(r) { return (r.Domain || '') === dom; });
+  html += '<div class="section-card"><div class="section-title">📋 ' + (L ? 'Exigences de mon domaine' : 'My domain requirements') + ' (' + sanitize(dom) + ')</div>';
+  if (!myReq.length) html += '<div class="empty-hint">' + (L ? 'Aucune exigence sur ce domaine' : 'No requirement') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Code' : 'Code') + '</th><th>' + (L ? 'Intitulé' : 'Title') + '</th><th>' + (L ? 'Priorité' : 'Priority') + '</th><th>' + (L ? 'Statut' : 'Status') + '</th><th></th></tr></thead><tbody>';
+    myReq.forEach(function(r) {
+      html += '<tr><td>' + sanitize(r.Code || '') + '</td><td><strong>' + sanitize(r.Title || '') + '</strong>' + (r.Rule ? '<div style="font-size:11px;color:#94a3b8;">' + sanitize(r.Rule) + '</div>' : '') + '</td>';
+      html += '<td><span class="badge ' + moscowCls(r.Priority) + '">' + moscowLabel(r.Priority) + '</span></td><td>' + sanitize(r.Status || '') + '</td>';
+      html += '<td>' + (r.Status !== 'validée' ? '<button class="btn btn-secondary btn-sm" onclick="contribValidateReq(' + r.id + ')">✓ ' + (L ? 'Valider' : 'Validate') + '</button>' : '<span style="color:#22c55e;font-weight:700;">✓ ' + (L ? 'Validée' : 'Validated') + '</span>') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // 4) Présences de mes formations (sessions de ma vague/profil — sinon toutes)
+  html += '<div class="section-card"><div class="section-title">🎓 ' + (L ? 'Présences de mes formations' : 'My training attendance') + '</div>';
+  if (!data.train.length) html += '<div class="empty-hint">' + (L ? 'Aucune session' : 'No session') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Session' : 'Session') + '</th><th>' + (L ? 'Date' : 'Date') + '</th><th>' + (L ? 'Capacité' : 'Capacity') + '</th><th>' + (L ? 'Présents' : 'Attendees') + '</th><th></th></tr></thead><tbody>';
+    data.train.slice().sort(function(a, b) { return (a.Date || 0) - (b.Date || 0); }).forEach(function(s) {
+      html += '<tr><td><strong>' + sanitize(s.Session || '') + '</strong><div style="font-size:11px;color:#94a3b8;">' + sanitize(s.Profile || '') + (s.Wave ? ' · ' + sanitize(s.Wave) : '') + '</div></td><td>' + (s.Date ? formatDate(s.Date) : '') + '</td><td>' + (s.Capacity || '') + '</td>';
+      html += '<td style="width:90px;"><input type="number" min="0" id="cb-att-' + s.id + '" value="' + (s.Attendees != null ? s.Attendees : '') + '" style="width:70px;padding:5px 8px;border:1px solid #e2e8f0;border-radius:6px;"></td>';
+      html += '<td><button class="btn btn-secondary btn-sm" onclick="contribSaveAttendees(' + s.id + ')">💾</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  cv.innerHTML = html;
+}
+async function contribSaveDq(id) {
+  var rec = { Perimeter: myReferent.Perimeter, Completeness: numVal('cb-comp'), Accuracy: numVal('cb-acc'), Consistency: numVal('cb-cons'), Traceability: numVal('cb-trac'), Freshness: numVal('cb-fresh'), Updated_At: Math.floor(Date.now() / 1000) };
+  await saveRow(T.DQ, id, rec);
+}
+function contribAddAnomaly() {
+  var L = currentLang === 'fr';
+  var dims = ['Complétude', 'Exactitude', 'Cohérence', 'Actualité', 'Traçabilité'];
+  var sevs = ['faible', 'moyenne', 'forte'];
+  var b = '<div class="form-group"><label>' + (L ? 'Description' : 'Description') + '</label><input id="ca-desc"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>Dimension</label><select id="ca-dim">' + dims.map(function(x) { return '<option>' + x + '</option>'; }).join('') + '</select></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Sévérité' : 'Severity') + '</label><select id="ca-sev">' + sevs.map(function(x) { return '<option>' + x + '</option>'; }).join('') + '</select></div></div>';
+  var f = '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="contribSaveAnomaly()">💾 ' + t('save') + '</button>';
+  openModal(L ? 'Signaler une anomalie' : 'Report anomaly', b, f);
+}
+async function contribSaveAnomaly() {
+  var rec = { Description: document.getElementById('ca-desc').value.trim(), Perimeter: myReferent.Perimeter, Dimension: document.getElementById('ca-dim').value, Severity: document.getElementById('ca-sev').value, Status: 'ouverte', Detected_At: Math.floor(Date.now() / 1000) };
+  if (!rec.Description) { showToast(currentLang === 'fr' ? 'Description requise' : 'Description required', 'error'); return; }
+  await saveRow(T.DANO, null, rec);
+}
+async function contribResolveAnomaly(id) {
+  await saveRow(T.DANO, id, { Status: 'corrigée' });
+}
+async function contribValidateReq(id) {
+  await saveRow(T.REQ, id, { Status: 'validée' });
+}
+async function contribSaveAttendees(id) {
+  var v = document.getElementById('cb-att-' + id).value;
+  await saveRow(T.TRAIN, id, { Attendees: v === '' ? null : parseInt(v), Status: 'réalisée' });
+}
+
+// =============================================================================
 // EXPORTS (PDF de la vue courante / Excel des données)
 // =============================================================================
 function exportCurrentViewPdf() {
@@ -947,6 +1109,59 @@ async function doSeedDemoData() {
 }
 
 // =============================================================================
+// DÉTECTION DE RÔLE (Owner / Editor) + rattachement référent
+// Pattern : table helper avec colonne user.Email + test ModifyColumn (Owner-only)
+// =============================================================================
+async function detectRole() {
+  var helperWriteSucceeded = false;
+  // 1) Table helper avec colonne UserEmail = user.Email
+  try {
+    var tables = await grist.docApi.listTables();
+    if (tables.indexOf(T.USERINFO) === -1) {
+      await grist.docApi.applyUserActions([['AddTable', T.USERINFO, [{ id: 'UserEmail', fields: { type: 'Text', label: 'UserEmail' } }]]]);
+      await grist.docApi.applyUserActions([['ModifyColumn', T.USERINFO, 'UserEmail', { isFormula: false, formula: 'user.Email', recalcWhen: 2, recalcDeps: null }]]);
+    }
+  } catch (e) { console.warn('helper table', e.message); }
+
+  // 2) Email courant (rafraîchit la ligne si on peut écrire, puis lecture via token REST)
+  try {
+    try {
+      var ex = await grist.docApi.fetchTable(T.USERINFO);
+      var ids = (ex && ex.id) ? ex.id : [];
+      var acts = ids.map(function(r) { return ['RemoveRecord', T.USERINFO, r]; });
+      acts.push(['AddRecord', T.USERINFO, null, {}]);
+      await grist.docApi.applyUserActions(acts);
+      helperWriteSucceeded = true;
+    } catch (wErr) { /* lecture seule */ }
+    var tok = await grist.docApi.getAccessToken({ readOnly: true });
+    var resp = await fetch(tok.baseUrl + '/tables/' + T.USERINFO + '/records?auth=' + tok.token);
+    if (resp.ok) {
+      var td = await resp.json();
+      if (td.records && td.records.length) currentUserEmail = td.records[0].fields.UserEmail || '';
+    } else {
+      var ui = await grist.docApi.fetchTable(T.USERINFO);
+      if (ui && ui.UserEmail && ui.UserEmail.length) currentUserEmail = ui.UserEmail[0] || '';
+    }
+  } catch (e) { console.warn('read email', e.message); }
+
+  // 3) Rôle : test d'une opération de schéma (Owner-only)
+  try {
+    await grist.docApi.applyUserActions([['ModifyColumn', T.USERINFO, 'UserEmail', { isFormula: false, formula: 'user.Email', recalcWhen: 2, recalcDeps: null }]]);
+    isOwner = true; isEditor = false;
+  } catch (sErr) {
+    isOwner = false; isEditor = helperWriteSucceeded;
+  }
+  console.log('Rôle — Owner:', isOwner, 'Editor:', isEditor, 'email:', currentUserEmail);
+}
+
+function resolveMyReferent() {
+  myReferent = null;
+  if (!currentUserEmail) return;
+  var e = currentUserEmail.toLowerCase().trim();
+  myReferent = data.ref.find(function(r) { return (r.Email || '').toLowerCase().trim() === e; }) || null;
+}
+
+// =============================================================================
 // BOOT
 // =============================================================================
 if (!isInsideGrist()) {
@@ -954,11 +1169,10 @@ if (!isInsideGrist()) {
   document.getElementById('main-content').classList.add('hidden');
 } else {
   (async function() {
-    try {
-      await grist.ready({ requiredAccess: 'full' });
-      canEdit = true;
-    } catch (e) { canEdit = false; }
+    try { await grist.ready({ requiredAccess: 'full' }); } catch (e) {}
     try { await ensureTables(); } catch (e) { console.warn('ensureTables', e); }
+    await detectRole();
+    canEdit = isOwner;            // seul l'Owner pilote le cockpit complet
     await loadAll();
     applyI18n();
     if (typeof grist.onRecords === 'function') {

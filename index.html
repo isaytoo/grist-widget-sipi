@@ -118,8 +118,8 @@
         </div>
       </div>
       <div class="app-header-right">
-        <button class="btn btn-secondary btn-sm" onclick="exportCurrentExcel()" title="Export Excel">📊 Excel</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportCurrentViewPdf()" title="Export PDF">📄 PDF</button>
+        <button id="btn-export-excel" class="btn btn-secondary btn-sm" onclick="exportCurrentExcel()" title="Export Excel">📊 Excel</button>
+        <button id="btn-export-pdf" class="btn btn-secondary btn-sm" onclick="exportCurrentViewPdf()" title="Export PDF">📄 PDF</button>
         <button class="lang-btn active" id="lang-fr" onclick="setLang('fr')">FR</button>
         <button class="lang-btn" id="lang-en" onclick="setLang('en')">EN</button>
       </div>
@@ -134,6 +134,7 @@
       <button class="tab-btn" data-tab="data" onclick="switchTab('data')">🧬 <span data-i18n="tabData">Qualité données</span></button>
       <button class="tab-btn" data-tab="training" onclick="switchTab('training')">🎓 <span data-i18n="tabTraining">Formation</span></button>
       <button class="tab-btn" data-tab="processes" onclick="switchTab('processes')">🔄 <span data-i18n="tabProcesses">Processus</span></button>
+      <button class="tab-btn" data-tab="referents" onclick="switchTab('referents')">👤 <span data-i18n="tabReferents">Référents</span></button>
     </div>
 
     <div class="tab-content active" id="tab-dashboard"><div id="view-dashboard"></div></div>
@@ -144,11 +145,14 @@
     <div class="tab-content" id="tab-data"><div id="view-data"></div></div>
     <div class="tab-content" id="tab-training"><div id="view-training"></div></div>
     <div class="tab-content" id="tab-processes"><div id="view-processes"></div></div>
+    <div class="tab-content" id="tab-referents"><div id="view-referents"></div></div>
+
+    <div id="contributor-view" class="hidden"></div>
   </div>
 
   <div id="modal-container"></div>
   <div id="toast-container"></div>
 
-  <script src="widget.js?v=3"></script>
+  <script src="widget.js?v=4"></script>
 </body>
 </html>
