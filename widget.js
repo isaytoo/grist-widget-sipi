@@ -95,6 +95,20 @@ function openModal(title, bodyHtml, footerHtml) {
 }
 function closeModalForce() { document.getElementById('modal-container').innerHTML = ''; }
 
+// Confirmation stylée (remplace confirm() natif)
+function showConfirm(message, onConfirm, opts) {
+  opts = opts || {};
+  var L = currentLang === 'fr';
+  var icon = opts.danger ? '🗑️' : '❓';
+  var btnCls = opts.danger ? 'btn-danger' : 'btn-primary';
+  var btnLabel = opts.confirmLabel || (L ? 'Confirmer' : 'Confirm');
+  var b = '<div style="display:flex;gap:14px;align-items:flex-start;"><div style="font-size:30px;">' + icon + '</div><p style="font-size:14px;color:#334155;line-height:1.5;margin-top:4px;">' + sanitize(message) + '</p></div>';
+  var f = '<button class="btn btn-secondary" onclick="closeModalForce()">' + (L ? 'Annuler' : 'Cancel') + '</button>' +
+          '<button class="btn ' + btnCls + '" id="confirm-yes-btn">' + btnLabel + '</button>';
+  openModal(opts.title || (L ? 'Confirmation' : 'Confirmation'), b, f);
+  document.getElementById('confirm-yes-btn').onclick = function() { closeModalForce(); onConfirm(); };
+}
+
 // CRUD génériques
 async function saveRow(table, id, rec) {
   try {
@@ -103,10 +117,11 @@ async function saveRow(table, id, rec) {
     showToast(t('saved'), 'success'); closeModalForce(); await loadAll();
   } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
 }
-async function deleteRow(table, id) {
-  if (!confirm(t('confirmDelete'))) return;
-  try { await grist.docApi.applyUserActions([['RemoveRecord', table, id]]); showToast(t('deleted'), 'success'); closeModalForce(); await loadAll(); }
-  catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+function deleteRow(table, id) {
+  showConfirm(t('confirmDelete'), async function() {
+    try { await grist.docApi.applyUserActions([['RemoveRecord', table, id]]); showToast(t('deleted'), 'success'); closeModalForce(); await loadAll(); }
+    catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+  }, { danger: true, confirmLabel: t('del') });
 }
 
 function fromEpoch(s) { if (!s) return ''; return new Date(s * 1000).toISOString().split('T')[0]; }
@@ -363,11 +378,7 @@ async function saveReq(id) {
     await loadAll();
   } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
 }
-async function deleteReq(id) {
-  if (!confirm(t('confirmDelete'))) return;
-  try { await grist.docApi.applyUserActions([['RemoveRecord', T.REQ, id]]); showToast(t('deleted'), 'success'); closeModalForce(); await loadAll(); }
-  catch (e) { showToast('Erreur: ' + e.message, 'error'); }
-}
+function deleteReq(id) { deleteRow(T.REQ, id); }
 
 // =============================================================================
 // MODULES À VENIR (placeholders — implémentés dans les prochains incréments)
@@ -835,9 +846,11 @@ function exportCurrentExcel() {
 // =============================================================================
 // JEU DE DONNÉES D'EXEMPLE (basé sur les documents SIPI Métropole de Lyon)
 // =============================================================================
-async function seedDemoData() {
+function seedDemoData() {
   if (!canEdit) { showToast(currentLang === 'fr' ? 'Lecture seule' : 'Read-only', 'error'); return; }
-  if (!confirm(currentLang === 'fr' ? 'Charger un jeu de données d\'exemple dans les tables vides ?' : 'Load sample data into empty tables?')) return;
+  showConfirm(currentLang === 'fr' ? 'Charger un jeu de données d\'exemple dans les tables vides ?' : 'Load sample data into empty tables?', doSeedDemoData, { confirmLabel: currentLang === 'fr' ? 'Charger' : 'Load' });
+}
+async function doSeedDemoData() {
   var E = toEpoch;
   var seeds = [
     [T.REQ, data.req, [
