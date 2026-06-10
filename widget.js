@@ -584,7 +584,115 @@ async function saveDec(id) {
   if (!rec.Decision) { showToast(currentLang === 'fr' ? 'Décision requise' : 'Decision required', 'error'); return; }
   await saveRow(T.DEC, id, rec);
 }
-function renderData() { placeholder('view-data', '🧬', t('tabData')); }
+function scoreColor(v) { return v >= 80 ? '#22c55e' : v >= 50 ? '#f59e0b' : '#ef4444'; }
+function pctCell(v) { if (typeof v !== 'number') return '<td style="color:#cbd5e1;">—</td>'; return '<td><span class="badge" style="background:' + scoreColor(v) + '22;color:' + scoreColor(v) + ';">' + Math.round(v) + '%</span></td>'; }
+function renderData() {
+  var L = currentLang === 'fr';
+  var html = '';
+  // Scorecard qualité (5 dimensions)
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🧬 ' + (L ? 'Qualité des données par périmètre' : 'Data quality by scope') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openDqModal()">+ ' + (L ? 'Périmètre' : 'Scope') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.dq.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Périmètre' : 'Scope') + '</th><th>' + (L ? 'Complétude' : 'Completeness') + '</th><th>' + (L ? 'Exactitude' : 'Accuracy') + '</th><th>' + (L ? 'Cohérence' : 'Consistency') + '</th><th>' + (L ? 'Actualité (j)' : 'Freshness (d)') + '</th><th>' + (L ? 'Traçabilité' : 'Traceability') + '</th><th>' + (L ? 'MàJ' : 'Updated') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.dq.forEach(function(d) {
+      html += '<tr><td><strong>' + sanitize(d.Perimeter || '') + '</strong></td>' + pctCell(d.Completeness) + pctCell(d.Accuracy) + pctCell(d.Consistency);
+      html += '<td>' + (typeof d.Freshness === 'number' ? Math.round(d.Freshness) + ' j' : '—') + '</td>' + pctCell(d.Traceability);
+      html += '<td>' + (d.Updated_At ? formatDate(d.Updated_At) : '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openDqModal(' + d.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.DQ + '\',' + d.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // Rôles data
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>👤 ' + (L ? 'Rôles data' : 'Data roles') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openDroleModal()">+ ' + (L ? 'Rôle' : 'Role') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.drole.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Rôle' : 'Role') + '</th><th>' + (L ? 'Personne' : 'Person') + '</th><th>' + (L ? 'Périmètre' : 'Scope') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.drole.forEach(function(d) {
+      html += '<tr><td><span class="badge badge-could">' + sanitize(d.Role || '') + '</span></td><td>' + sanitize(d.Person || '') + '</td><td>' + sanitize(d.Perimeter || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openDroleModal(' + d.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.DROLE + '\',' + d.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // Anomalies
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🐞 ' + (L ? 'Anomalies de données' : 'Data anomalies') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openDanoModal()">+ ' + (L ? 'Anomalie' : 'Anomaly') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.dano.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Description' : 'Description') + '</th><th>' + (L ? 'Périmètre' : 'Scope') + '</th><th>' + (L ? 'Dimension' : 'Dimension') + '</th><th>' + (L ? 'Sévérité' : 'Severity') + '</th><th>' + (L ? 'Statut' : 'Status') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.dano.forEach(function(d) {
+      var sevCls = d.Severity === 'forte' ? 'badge-must' : d.Severity === 'moyenne' ? 'badge-should' : 'badge-wont';
+      html += '<tr><td><strong>' + sanitize(d.Description || '') + '</strong></td><td>' + sanitize(d.Perimeter || '') + '</td><td>' + sanitize(d.Dimension || '') + '</td><td><span class="badge ' + sevCls + '">' + sanitize(d.Severity || '') + '</span></td><td>' + sanitize(d.Status || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openDanoModal(' + d.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.DANO + '\',' + d.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-data').innerHTML = html;
+}
+function numInput(id, val) { return '<input type="number" min="0" max="100" id="' + id + '" value="' + (typeof val === 'number' ? val : '') + '">'; }
+function openDqModal(id) {
+  if (!canEdit) return;
+  var d = id ? data.dq.find(function(x) { return x.id === id; }) : { Updated_At: Math.floor(Date.now() / 1000) };
+  var L = currentLang === 'fr';
+  var b = '<div class="form-group"><label>' + (L ? 'Périmètre (direction)' : 'Scope (department)') + '</label><input id="dq-per" value="' + sanitize(d.Perimeter || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Complétude %' : 'Completeness %') + '</label>' + numInput('dq-comp', d.Completeness) + '</div><div class="form-group"><label>' + (L ? 'Exactitude %' : 'Accuracy %') + '</label>' + numInput('dq-acc', d.Accuracy) + '</div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Cohérence %' : 'Consistency %') + '</label>' + numInput('dq-cons', d.Consistency) + '</div><div class="form-group"><label>' + (L ? 'Traçabilité %' : 'Traceability %') + '</label>' + numInput('dq-trac', d.Traceability) + '</div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Actualité (jours)' : 'Freshness (days)') + '</label><input type="number" min="0" id="dq-fresh" value="' + (typeof d.Freshness === 'number' ? d.Freshness : '') + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Date de mesure' : 'Measured on') + '</label><input type="date" id="dq-date" value="' + fromEpoch(d.Updated_At) + '"></div></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.DQ + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveDq(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(L ? 'Qualité des données' : 'Data quality', b, f);
+}
+function numVal(id) { var v = document.getElementById(id).value; return v === '' ? null : parseFloat(v); }
+async function saveDq(id) {
+  var rec = { Perimeter: document.getElementById('dq-per').value.trim(), Completeness: numVal('dq-comp'), Accuracy: numVal('dq-acc'), Consistency: numVal('dq-cons'), Traceability: numVal('dq-trac'), Freshness: numVal('dq-fresh'), Updated_At: toEpoch(document.getElementById('dq-date').value) };
+  if (!rec.Perimeter) { showToast(currentLang === 'fr' ? 'Périmètre requis' : 'Scope required', 'error'); return; }
+  await saveRow(T.DQ, id, rec);
+}
+function openDroleModal(id) {
+  if (!canEdit) return;
+  var d = id ? data.drole.find(function(x) { return x.id === id; }) : {};
+  var roles = ['Data Owner', 'Data Steward', 'Data Producer', 'Data Manager', 'Data Architect'];
+  var b = '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Rôle' : 'Role') + '</label><select id="dr-role">' + roles.map(function(r) { return '<option' + (d.Role === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Personne' : 'Person') + '</label><input id="dr-person" value="' + sanitize(d.Person || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Périmètre' : 'Scope') + '</label><input id="dr-per" value="' + sanitize(d.Perimeter || '') + '"></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.DROLE + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveDrole(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(currentLang === 'fr' ? 'Rôle data' : 'Data role', b, f);
+}
+async function saveDrole(id) {
+  var rec = { Role: document.getElementById('dr-role').value, Person: document.getElementById('dr-person').value.trim(), Perimeter: document.getElementById('dr-per').value.trim() };
+  if (!rec.Person) { showToast(currentLang === 'fr' ? 'Personne requise' : 'Person required', 'error'); return; }
+  await saveRow(T.DROLE, id, rec);
+}
+function openDanoModal(id) {
+  if (!canEdit) return;
+  var d = id ? data.dano.find(function(x) { return x.id === id; }) : { Status: 'ouverte', Detected_At: Math.floor(Date.now() / 1000) };
+  var dims = ['Complétude', 'Exactitude', 'Cohérence', 'Actualité', 'Traçabilité'];
+  var sevs = ['faible', 'moyenne', 'forte'];
+  var b = '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Description' : 'Description') + '</label><input id="da-desc" value="' + sanitize(d.Description || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Périmètre' : 'Scope') + '</label><input id="da-per" value="' + sanitize(d.Perimeter || '') + '"></div>';
+  b += '<div class="form-group"><label>Dimension</label><select id="da-dim">' + dims.map(function(x) { return '<option' + (d.Dimension === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Sévérité' : 'Severity') + '</label><select id="da-sev">' + sevs.map(function(x) { return '<option' + (d.Severity === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Statut' : 'Status') + '</label><select id="da-status"><option' + (d.Status === 'ouverte' ? ' selected' : '') + '>ouverte</option><option' + (d.Status === 'corrigée' ? ' selected' : '') + '>corrigée</option></select></div></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.DANO + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveDano(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(currentLang === 'fr' ? 'Anomalie' : 'Anomaly', b, f);
+}
+async function saveDano(id) {
+  var rec = { Description: document.getElementById('da-desc').value.trim(), Perimeter: document.getElementById('da-per').value.trim(), Dimension: document.getElementById('da-dim').value, Severity: document.getElementById('da-sev').value, Status: document.getElementById('da-status').value };
+  if (!rec.Description) { showToast(currentLang === 'fr' ? 'Description requise' : 'Description required', 'error'); return; }
+  await saveRow(T.DANO, id, rec);
+}
 function renderTraining() { placeholder('view-training', '🎓', t('tabTraining')); }
 function renderProcesses() { placeholder('view-processes', '🔄', t('tabProcesses')); }
 
