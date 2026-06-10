@@ -1,0 +1,391 @@
+/*
+ * Cockpit de pilotage projet SI — Widget Grist
+ * Copyright 2026 Saïd Hamadou (isaytoo) — Apache License 2.0
+ */
+
+// =============================================================================
+// TABLES
+// =============================================================================
+var T = {
+  REQ: 'SIPI_Requirements',
+  PHASE: 'SIPI_Phases',
+  RISK: 'SIPI_Risks',
+  RACI: 'SIPI_RACI',
+  INST: 'SIPI_Instances',
+  DEC: 'SIPI_Decisions',
+  DQ: 'SIPI_DataQuality',
+  DROLE: 'SIPI_DataRoles',
+  DANO: 'SIPI_DataAnomalies',
+  TRAIN: 'SIPI_Training',
+  PROC: 'SIPI_Processes'
+};
+
+// =============================================================================
+// I18N
+// =============================================================================
+var currentLang = 'fr';
+var I18N = {
+  fr: {
+    appTitle: 'Cockpit de pilotage projet SI', appSubtitle: 'Pilotage exigences, risques, données, gouvernance, formation',
+    tabDashboard: 'Tableau de bord', tabRequirements: 'Exigences', tabRoadmap: 'Feuille de route', tabRisks: 'Risques',
+    tabGovernance: 'RACI & Gouvernance', tabData: 'Qualité données', tabTraining: 'Formation', tabProcesses: 'Processus',
+    add: 'Ajouter', edit: 'Modifier', del: 'Supprimer', save: 'Enregistrer', cancel: 'Annuler', close: 'Fermer',
+    confirmDelete: 'Confirmer la suppression ?', saved: 'Enregistré ✓', deleted: 'Supprimé ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
+    comingSoon: 'Module en cours de développement', noData: 'Aucune donnée pour le moment',
+    // dashboard
+    dashTitle: 'Synthèse de pilotage', kpiReqMust: 'Exigences « Must » restantes', kpiRisksCritical: 'Risques critiques',
+    kpiDataScore: 'Score qualité données', kpiTrained: 'Agents formés', kpiReqTotal: 'Exigences', kpiPhases: 'Phases en cours', kpiDecisionsOpen: 'Décisions en attente',
+    // requirements
+    reqTitle: 'Exigences fonctionnelles', reqNew: 'Nouvelle exigence', reqCode: 'Code', reqLabel: 'Intitulé',
+    reqDomain: 'Domaine', reqPriority: 'Priorité (MoSCoW)', reqRule: 'Règle métier', reqStatus: 'Statut', reqOwner: 'Responsable',
+    viewBoard: 'Vue MoSCoW', viewTable: 'Vue tableau'
+  },
+  en: {
+    appTitle: 'IT Project Cockpit', appSubtitle: 'Requirements, risks, data, governance, training',
+    tabDashboard: 'Dashboard', tabRequirements: 'Requirements', tabRoadmap: 'Roadmap', tabRisks: 'Risks',
+    tabGovernance: 'RACI & Governance', tabData: 'Data quality', tabTraining: 'Training', tabProcesses: 'Processes',
+    add: 'Add', edit: 'Edit', del: 'Delete', save: 'Save', cancel: 'Cancel', close: 'Close',
+    confirmDelete: 'Confirm deletion?', saved: 'Saved ✓', deleted: 'Deleted ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
+    comingSoon: 'Module under development', noData: 'No data yet',
+    dashTitle: 'Steering summary', kpiReqMust: 'Remaining "Must" requirements', kpiRisksCritical: 'Critical risks',
+    kpiDataScore: 'Data quality score', kpiTrained: 'Trained agents', kpiReqTotal: 'Requirements', kpiPhases: 'Phases in progress', kpiDecisionsOpen: 'Pending decisions',
+    reqTitle: 'Functional requirements', reqNew: 'New requirement', reqCode: 'Code', reqLabel: 'Title',
+    reqDomain: 'Domain', reqPriority: 'Priority (MoSCoW)', reqRule: 'Business rule', reqStatus: 'Status', reqOwner: 'Owner',
+    viewBoard: 'MoSCoW view', viewTable: 'Table view'
+  }
+};
+function t(k) { return (I18N[currentLang] && I18N[currentLang][k]) || (I18N.fr[k]) || k; }
+function setLang(l) {
+  currentLang = l;
+  document.getElementById('lang-fr').classList.toggle('active', l === 'fr');
+  document.getElementById('lang-en').classList.toggle('active', l === 'en');
+  applyI18n();
+  renderCurrentTab();
+}
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(function(el) { el.textContent = t(el.getAttribute('data-i18n')); });
+}
+
+// =============================================================================
+// DATA
+// =============================================================================
+var data = { req: [], phase: [], risk: [], raci: [], inst: [], dec: [], dq: [], drole: [], dano: [], train: [], proc: [] };
+var canEdit = false;
+
+function sanitize(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function showToast(msg, type) {
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + (type || 'info');
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(function() { el.remove(); }, 3000);
+}
+
+// Modale : fermeture uniquement via la croix/Annuler (jamais au clic extérieur)
+function openModal(title, bodyHtml, footerHtml) {
+  var html = '<div class="modal-overlay"><div class="modal" onclick="event.stopPropagation()">';
+  html += '<div class="modal-header"><h3>' + title + '</h3><button class="modal-close" onclick="closeModalForce()">✕</button></div>';
+  html += '<div class="modal-body">' + bodyHtml + '</div>';
+  html += '<div class="modal-footer">' + (footerHtml || '') + '</div>';
+  html += '</div></div>';
+  document.getElementById('modal-container').innerHTML = html;
+}
+function closeModalForce() { document.getElementById('modal-container').innerHTML = ''; }
+
+function fromEpoch(s) { if (!s) return ''; return new Date(s * 1000).toISOString().split('T')[0]; }
+function toEpoch(str) { if (!str) return null; var d = new Date(str + 'T00:00:00'); return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000); }
+function formatDate(s) { if (!s) return ''; var d = new Date(s * 1000); return d.toLocaleDateString(currentLang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }); }
+
+// =============================================================================
+// GRIST INIT + TABLES
+// =============================================================================
+function isInsideGrist() { try { return window.self !== window.top; } catch (e) { return true; } }
+
+async function ensureTables() {
+  var existing = await grist.docApi.listTables();
+  var defs = [
+    [T.REQ, [
+      { id: 'Code', type: 'Text' }, { id: 'Title', type: 'Text' },
+      { id: 'Domain', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'] }) },
+      { id: 'Priority', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['must', 'should', 'could', 'wont'] }) },
+      { id: 'Rule', type: 'Text' },
+      { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à spécifier', 'validée', 'paramétrée', 'recettée'] }) },
+      { id: 'Owner', type: 'Text' }, { id: 'Notes', type: 'Text' }
+    ]],
+    [T.PHASE, [
+      { id: 'Name', type: 'Text' }, { id: 'Phase_Num', type: 'Int' }, { id: 'Start_Date', type: 'Date' }, { id: 'End_Date', type: 'Date' },
+      { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à venir', 'en cours', 'terminée'] }) },
+      { id: 'Deliverable', type: 'Text' }, { id: 'Wave', type: 'Text' }
+    ]],
+    [T.RISK, [
+      { id: 'Title', type: 'Text' }, { id: 'Probability', type: 'Int' }, { id: 'Impact', type: 'Int' },
+      { id: 'Mitigation', type: 'Text' }, { id: 'Owner', type: 'Text' },
+      { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['ouvert', 'maîtrisé', 'clos'] }) }
+    ]],
+    [T.RACI, [{ id: 'Activity', type: 'Text' }, { id: 'R', type: 'Text' }, { id: 'A', type: 'Text' }, { id: 'C', type: 'Text' }, { id: 'I', type: 'Text' }, { id: 'Order', type: 'Int' }]],
+    [T.INST, [{ id: 'Name', type: 'Text' }, { id: 'Composition', type: 'Text' }, { id: 'Frequency', type: 'Text' }, { id: 'Next_Date', type: 'Date' }, { id: 'Role', type: 'Text' }]],
+    [T.DEC, [{ id: 'Date', type: 'Date' }, { id: 'Instance', type: 'Text' }, { id: 'Decision', type: 'Text' }, { id: 'Action', type: 'Text' }, { id: 'Responsible', type: 'Text' }, { id: 'Due_Date', type: 'Date' }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['ouverte', 'en cours', 'close'] }) }]],
+    [T.DQ, [{ id: 'Perimeter', type: 'Text' }, { id: 'Completeness', type: 'Numeric' }, { id: 'Accuracy', type: 'Numeric' }, { id: 'Consistency', type: 'Numeric' }, { id: 'Freshness', type: 'Numeric' }, { id: 'Traceability', type: 'Numeric' }, { id: 'Updated_At', type: 'Date' }]],
+    [T.DROLE, [{ id: 'Role', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Data Owner', 'Data Steward', 'Data Producer', 'Data Manager', 'Data Architect'] }) }, { id: 'Person', type: 'Text' }, { id: 'Perimeter', type: 'Text' }]],
+    [T.DANO, [{ id: 'Description', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Dimension', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Complétude', 'Exactitude', 'Cohérence', 'Actualité', 'Traçabilité'] }) }, { id: 'Severity', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['faible', 'moyenne', 'forte'] }) }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['ouverte', 'corrigée'] }) }, { id: 'Detected_At', type: 'Date' }]],
+    [T.TRAIN, [{ id: 'Session', type: 'Text' }, { id: 'Profile', type: 'Text' }, { id: 'Wave', type: 'Text' }, { id: 'Date', type: 'Date' }, { id: 'Duration', type: 'Text' }, { id: 'Trainer', type: 'Text' }, { id: 'Capacity', type: 'Int' }, { id: 'Attendees', type: 'Int' }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['planifiée', 'réalisée', 'annulée'] }) }]],
+    [T.PROC, [{ id: 'Name', type: 'Text' }, { id: 'Context', type: 'Text' }, { id: 'AsIs', type: 'Text' }, { id: 'ToBe', type: 'Text' }, { id: 'PainPoints', type: 'Text' }, { id: 'Gains', type: 'Text' }, { id: 'ConfigRequired', type: 'Text' }, { id: 'IntegrationStatus', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à analyser', 'en cours', 'intégré'] }) }]]
+  ];
+  for (var i = 0; i < defs.length; i++) {
+    if (existing.indexOf(defs[i][0]) === -1) {
+      try { await grist.docApi.applyUserActions([['AddTable', defs[i][0], defs[i][1]]]); }
+      catch (e) { console.warn('AddTable ' + defs[i][0], e.message); }
+    }
+  }
+}
+
+async function fetchAll(table) {
+  try {
+    var d = await grist.docApi.fetchTable(table);
+    if (!d || !d.id) return [];
+    var cols = Object.keys(d).filter(function(k) { return k !== 'id'; });
+    var rows = [];
+    for (var i = 0; i < d.id.length; i++) {
+      var r = { id: d.id[i] };
+      cols.forEach(function(c) { r[c] = d[c][i]; });
+      rows.push(r);
+    }
+    return rows;
+  } catch (e) { return []; }
+}
+
+async function loadAll() {
+  data.req = await fetchAll(T.REQ);
+  data.phase = await fetchAll(T.PHASE);
+  data.risk = await fetchAll(T.RISK);
+  data.raci = await fetchAll(T.RACI);
+  data.inst = await fetchAll(T.INST);
+  data.dec = await fetchAll(T.DEC);
+  data.dq = await fetchAll(T.DQ);
+  data.drole = await fetchAll(T.DROLE);
+  data.dano = await fetchAll(T.DANO);
+  data.train = await fetchAll(T.TRAIN);
+  data.proc = await fetchAll(T.PROC);
+  renderCurrentTab();
+}
+
+// =============================================================================
+// NAVIGATION
+// =============================================================================
+var currentTab = 'dashboard';
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tab') === tab); });
+  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.toggle('active', c.id === 'tab-' + tab); });
+  renderCurrentTab();
+}
+function renderCurrentTab() {
+  var r = { dashboard: renderDashboard, requirements: renderRequirements, roadmap: renderRoadmap, risks: renderRisks,
+    governance: renderGovernance, data: renderData, training: renderTraining, processes: renderProcesses };
+  if (r[currentTab]) r[currentTab]();
+}
+function placeholder(viewId, icon, label) {
+  document.getElementById(viewId).innerHTML = '<div class="section-card"><div class="empty-hint"><div style="font-size:42px;">' + icon + '</div><h3 style="color:#475569;margin:8px 0;">' + label + '</h3><p>' + t('comingSoon') + '</p></div></div>';
+}
+
+// =============================================================================
+// DASHBOARD
+// =============================================================================
+function renderDashboard() {
+  var mustLeft = data.req.filter(function(r) { return r.Priority === 'must' && r.Status !== 'recettée'; }).length;
+  var risksCrit = data.risk.filter(function(r) { return (r.Probability || 0) * (r.Impact || 0) >= 6 && r.Status !== 'clos'; }).length;
+  var dataScore = computeGlobalDataScore();
+  var trainedPct = computeTrainedPct();
+  var phasesInProgress = data.phase.filter(function(p) { return p.Status === 'en cours'; }).length;
+  var decOpen = data.dec.filter(function(d) { return d.Status !== 'close'; }).length;
+
+  var html = '<div class="section-card"><div class="section-title">📊 ' + t('dashTitle') + '</div>';
+  html += '<div class="kpi-grid">';
+  html += kpi(data.req.length, t('kpiReqTotal'), '');
+  html += kpi(mustLeft, t('kpiReqMust'), mustLeft > 0 ? 'warn' : 'ok');
+  html += kpi(risksCrit, t('kpiRisksCritical'), risksCrit > 0 ? 'danger' : 'ok');
+  html += kpi(dataScore + '%', t('kpiDataScore'), dataScore >= 80 ? 'ok' : (dataScore >= 50 ? 'warn' : 'danger'));
+  html += kpi(trainedPct + '%', t('kpiTrained'), trainedPct >= 80 ? 'ok' : 'warn');
+  html += kpi(phasesInProgress, t('kpiPhases'), '');
+  html += kpi(decOpen, t('kpiDecisionsOpen'), decOpen > 0 ? 'warn' : 'ok');
+  html += '</div></div>';
+
+  // Prochaines instances
+  var upcoming = data.inst.filter(function(i) { return i.Next_Date; }).sort(function(a, b) { return a.Next_Date - b.Next_Date; }).slice(0, 5);
+  if (upcoming.length) {
+    html += '<div class="section-card"><div class="section-title">📅 ' + (currentLang === 'fr' ? 'Prochaines instances' : 'Upcoming meetings') + '</div><table class="data-table"><thead><tr><th>' + (currentLang === 'fr' ? 'Instance' : 'Meeting') + '</th><th>' + (currentLang === 'fr' ? 'Date' : 'Date') + '</th><th>' + (currentLang === 'fr' ? 'Fréquence' : 'Frequency') + '</th></tr></thead><tbody>';
+    upcoming.forEach(function(i) { html += '<tr><td><strong>' + sanitize(i.Name) + '</strong></td><td>' + formatDate(i.Next_Date) + '</td><td>' + sanitize(i.Frequency || '') + '</td></tr>'; });
+    html += '</tbody></table></div>';
+  }
+
+  // Risques critiques
+  var crit = data.risk.filter(function(r) { return (r.Probability || 0) * (r.Impact || 0) >= 6 && r.Status !== 'clos'; });
+  if (crit.length) {
+    html += '<div class="section-card"><div class="section-title">⚠️ ' + t('kpiRisksCritical') + '</div><table class="data-table"><thead><tr><th>' + (currentLang === 'fr' ? 'Risque' : 'Risk') + '</th><th>Score</th><th>' + (currentLang === 'fr' ? 'Mitigation' : 'Mitigation') + '</th></tr></thead><tbody>';
+    crit.forEach(function(r) { html += '<tr><td><strong>' + sanitize(r.Title) + '</strong></td><td><span class="badge badge-must">' + ((r.Probability || 0) * (r.Impact || 0)) + '</span></td><td>' + sanitize(r.Mitigation || '') + '</td></tr>'; });
+    html += '</tbody></table></div>';
+  }
+
+  document.getElementById('view-dashboard').innerHTML = html;
+}
+function kpi(value, label, cls) {
+  return '<div class="kpi-card ' + (cls || '') + '"><div class="kpi-value">' + value + '</div><div class="kpi-label">' + label + '</div></div>';
+}
+function computeGlobalDataScore() {
+  if (!data.dq.length) return 0;
+  var sum = 0, n = 0;
+  data.dq.forEach(function(d) {
+    ['Completeness', 'Accuracy', 'Consistency', 'Traceability'].forEach(function(k) {
+      if (typeof d[k] === 'number') { sum += d[k]; n++; }
+    });
+  });
+  return n ? Math.round(sum / n) : 0;
+}
+function computeTrainedPct() {
+  var done = data.train.filter(function(s) { return s.Status === 'réalisée'; });
+  if (!done.length) return 0;
+  var cap = 0, att = 0;
+  done.forEach(function(s) { cap += (s.Capacity || 0); att += (s.Attendees || 0); });
+  return cap ? Math.round(att / cap * 100) : 0;
+}
+
+// =============================================================================
+// REQUIREMENTS (MoSCoW)
+// =============================================================================
+var reqView = 'board';
+var MOSCOW = [
+  { key: 'must', label_fr: 'Must (indispensable)', label_en: 'Must have', cls: 'badge-must' },
+  { key: 'should', label_fr: 'Should (important)', label_en: 'Should have', cls: 'badge-should' },
+  { key: 'could', label_fr: 'Could (souhaitable)', label_en: 'Could have', cls: 'badge-could' },
+  { key: 'wont', label_fr: "Won't (exclu)", label_en: "Won't have", cls: 'badge-wont' }
+];
+function moscowLabel(k) { var m = MOSCOW.find(function(x) { return x.key === k; }); return m ? (currentLang === 'fr' ? m.label_fr : m.label_en) : k; }
+function moscowCls(k) { var m = MOSCOW.find(function(x) { return x.key === k; }); return m ? m.cls : 'badge-wont'; }
+
+function renderRequirements() {
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>📋 ' + t('reqTitle') + '</span>';
+  html += '<span style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-secondary btn-sm" onclick="toggleReqView()">' + (reqView === 'board' ? t('viewTable') : t('viewBoard')) + '</button>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openReqModal()">+ ' + t('reqNew') + '</button>';
+  html += '</span></div>';
+
+  if (data.req.length === 0) {
+    html += '<div class="empty-hint">' + t('noData') + '</div></div>';
+    document.getElementById('view-requirements').innerHTML = html;
+    return;
+  }
+
+  if (reqView === 'board') {
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">';
+    MOSCOW.forEach(function(m) {
+      var items = data.req.filter(function(r) { return r.Priority === m.key; });
+      html += '<div style="background:#f8fafc;border-radius:10px;padding:10px;">';
+      html += '<div style="font-weight:800;margin-bottom:8px;"><span class="badge ' + m.cls + '">' + moscowLabel(m.key) + '</span> <span style="color:#94a3b8;">' + items.length + '</span></div>';
+      items.forEach(function(r) {
+        html += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:6px;cursor:' + (canEdit ? 'pointer' : 'default') + ';"' + (canEdit ? ' onclick="openReqModal(' + r.id + ')"' : '') + '>';
+        html += '<div style="font-size:10px;color:#94a3b8;">' + sanitize(r.Code || '') + ' · ' + sanitize(r.Domain || '') + '</div>';
+        html += '<div style="font-weight:700;font-size:12px;">' + sanitize(r.Title || '') + '</div>';
+        html += '<div style="font-size:10px;color:#64748b;margin-top:3px;">' + sanitize(r.Status || '') + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr><th>' + t('reqCode') + '</th><th>' + t('reqLabel') + '</th><th>' + t('reqDomain') + '</th><th>' + t('reqPriority') + '</th><th>' + t('reqStatus') + '</th><th>' + t('reqOwner') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.req.forEach(function(r) {
+      html += '<tr>';
+      html += '<td>' + sanitize(r.Code || '') + '</td><td><strong>' + sanitize(r.Title || '') + '</strong>' + (r.Rule ? '<div style="font-size:11px;color:#94a3b8;">' + sanitize(r.Rule) + '</div>' : '') + '</td>';
+      html += '<td>' + sanitize(r.Domain || '') + '</td><td><span class="badge ' + moscowCls(r.Priority) + '">' + moscowLabel(r.Priority) + '</span></td>';
+      html += '<td>' + sanitize(r.Status || '') + '</td><td>' + sanitize(r.Owner || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openReqModal(' + r.id + ')">✏️</button><button class="btn-icon" onclick="deleteReq(' + r.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-requirements').innerHTML = html;
+}
+function toggleReqView() { reqView = reqView === 'board' ? 'table' : 'board'; renderRequirements(); }
+
+function openReqModal(id) {
+  if (!canEdit) return;
+  var r = id ? data.req.find(function(x) { return x.id === id; }) : {};
+  var domains = ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'];
+  var statuses = ['à spécifier', 'validée', 'paramétrée', 'recettée'];
+  var b = '';
+  b += '<div class="form-row"><div class="form-group"><label>' + t('reqCode') + '</label><input id="rq-code" value="' + sanitize(r.Code || '') + '"></div>';
+  b += '<div class="form-group"><label>' + t('reqDomain') + '</label><select id="rq-domain">' + domains.map(function(d) { return '<option' + (r.Domain === d ? ' selected' : '') + '>' + d + '</option>'; }).join('') + '</select></div></div>';
+  b += '<div class="form-group"><label>' + t('reqLabel') + '</label><input id="rq-title" value="' + sanitize(r.Title || '') + '"></div>';
+  b += '<div class="form-group"><label>' + t('reqRule') + '</label><textarea id="rq-rule" rows="2">' + sanitize(r.Rule || '') + '</textarea></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + t('reqPriority') + '</label><select id="rq-prio">' + MOSCOW.map(function(m) { return '<option value="' + m.key + '"' + (r.Priority === m.key ? ' selected' : '') + '>' + moscowLabel(m.key) + '</option>'; }).join('') + '</select></div>';
+  b += '<div class="form-group"><label>' + t('reqStatus') + '</label><select id="rq-status">' + statuses.map(function(s) { return '<option' + (r.Status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>';
+  b += '<div class="form-group"><label>' + t('reqOwner') + '</label><input id="rq-owner" value="' + sanitize(r.Owner || '') + '"></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteReq(' + id + ')">🗑️ ' + t('del') + '</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveReq(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal((id ? '✏️ ' : '✨ ') + t('reqNew'), b, f);
+}
+async function saveReq(id) {
+  var rec = {
+    Code: document.getElementById('rq-code').value.trim(),
+    Title: document.getElementById('rq-title').value.trim(),
+    Domain: document.getElementById('rq-domain').value,
+    Rule: document.getElementById('rq-rule').value.trim(),
+    Priority: document.getElementById('rq-prio').value,
+    Status: document.getElementById('rq-status').value,
+    Owner: document.getElementById('rq-owner').value.trim()
+  };
+  if (!rec.Title) { showToast(currentLang === 'fr' ? 'Intitulé requis' : 'Title required', 'error'); return; }
+  try {
+    if (id) await grist.docApi.applyUserActions([['UpdateRecord', T.REQ, id, rec]]);
+    else await grist.docApi.applyUserActions([['AddRecord', T.REQ, null, rec]]);
+    showToast(t('saved'), 'success');
+    closeModalForce();
+    await loadAll();
+  } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
+async function deleteReq(id) {
+  if (!confirm(t('confirmDelete'))) return;
+  try { await grist.docApi.applyUserActions([['RemoveRecord', T.REQ, id]]); showToast(t('deleted'), 'success'); closeModalForce(); await loadAll(); }
+  catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
+
+// =============================================================================
+// MODULES À VENIR (placeholders — implémentés dans les prochains incréments)
+// =============================================================================
+function renderRoadmap() { placeholder('view-roadmap', '🗺️', t('tabRoadmap')); }
+function renderRisks() { placeholder('view-risks', '⚠️', t('tabRisks')); }
+function renderGovernance() { placeholder('view-governance', '👥', t('tabGovernance')); }
+function renderData() { placeholder('view-data', '🧬', t('tabData')); }
+function renderTraining() { placeholder('view-training', '🎓', t('tabTraining')); }
+function renderProcesses() { placeholder('view-processes', '🔄', t('tabProcesses')); }
+
+// =============================================================================
+// BOOT
+// =============================================================================
+if (!isInsideGrist()) {
+  document.getElementById('not-in-grist').classList.remove('hidden');
+  document.getElementById('main-content').classList.add('hidden');
+} else {
+  (async function() {
+    try {
+      await grist.ready({ requiredAccess: 'full' });
+      canEdit = true;
+    } catch (e) { canEdit = false; }
+    try { await ensureTables(); } catch (e) { console.warn('ensureTables', e); }
+    await loadAll();
+    applyI18n();
+    if (typeof grist.onRecords === 'function') {
+      var tmr = null;
+      grist.onRecords(function() {
+        if (tmr) clearTimeout(tmr);
+        tmr = setTimeout(function() {
+          if (document.getElementById('modal-container').innerHTML.trim() !== '') return;
+          loadAll();
+        }, 500);
+      });
+    }
+  })();
+}
