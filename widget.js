@@ -693,8 +693,107 @@ async function saveDano(id) {
   if (!rec.Description) { showToast(currentLang === 'fr' ? 'Description requise' : 'Description required', 'error'); return; }
   await saveRow(T.DANO, id, rec);
 }
-function renderTraining() { placeholder('view-training', '🎓', t('tabTraining')); }
-function renderProcesses() { placeholder('view-processes', '🔄', t('tabProcesses')); }
+function renderTraining() {
+  var L = currentLang === 'fr';
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🎓 ' + t('tabTraining') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openTrainModal()">+ ' + (L ? 'Session' : 'Session') + '</button></span></div>';
+  else html += '</span></div>';
+
+  // KPI formation
+  var done = data.train.filter(function(s) { return s.Status === 'réalisée'; });
+  var planned = data.train.filter(function(s) { return s.Status === 'planifiée'; });
+  var cap = 0, att = 0; done.forEach(function(s) { cap += (s.Capacity || 0); att += (s.Attendees || 0); });
+  html += '<div class="kpi-grid" style="margin-bottom:14px;">';
+  html += kpi(data.train.length, L ? 'Sessions' : 'Sessions', '');
+  html += kpi(done.length, L ? 'Réalisées' : 'Completed', 'ok');
+  html += kpi(planned.length, L ? 'Planifiées' : 'Planned', '');
+  html += kpi((cap ? Math.round(att / cap * 100) : 0) + '%', L ? 'Taux de présence' : 'Attendance rate', cap && att / cap >= 0.8 ? 'ok' : 'warn');
+  html += '</div>';
+
+  if (!data.train.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Session' : 'Session') + '</th><th>' + (L ? 'Profil' : 'Profile') + '</th><th>' + (L ? 'Vague' : 'Wave') + '</th><th>' + (L ? 'Date' : 'Date') + '</th><th>' + (L ? 'Durée' : 'Duration') + '</th><th>' + (L ? 'Formateur' : 'Trainer') + '</th><th>' + (L ? 'Présents' : 'Attendees') + '</th><th>' + (L ? 'Statut' : 'Status') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.train.slice().sort(function(a, b) { return (a.Date || 0) - (b.Date || 0); }).forEach(function(s) {
+      var ratio = s.Capacity ? Math.round((s.Attendees || 0) / s.Capacity * 100) : null;
+      html += '<tr><td><strong>' + sanitize(s.Session || '') + '</strong></td><td>' + sanitize(s.Profile || '') + '</td><td>' + sanitize(s.Wave || '') + '</td><td>' + (s.Date ? formatDate(s.Date) : '') + '</td><td>' + sanitize(s.Duration || '') + '</td><td>' + sanitize(s.Trainer || '') + '</td>';
+      html += '<td>' + (s.Attendees != null ? s.Attendees : 0) + (s.Capacity ? ' / ' + s.Capacity + (ratio != null ? ' <span class="badge" style="background:' + scoreColor(ratio) + '22;color:' + scoreColor(ratio) + ';">' + ratio + '%</span>' : '') : '') + '</td>';
+      var stCls = s.Status === 'réalisée' ? 'badge-could' : s.Status === 'annulée' ? 'badge-must' : 'badge-should';
+      html += '<td><span class="badge ' + stCls + '">' + sanitize(s.Status || '') + '</span></td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openTrainModal(' + s.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.TRAIN + '\',' + s.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-training').innerHTML = html;
+}
+function openTrainModal(id) {
+  if (!canEdit) return;
+  var s = id ? data.train.find(function(x) { return x.id === id; }) : { Status: 'planifiée' };
+  var L = currentLang === 'fr';
+  var statuses = ['planifiée', 'réalisée', 'annulée'];
+  var b = '<div class="form-group"><label>' + (L ? 'Intitulé de la session' : 'Session title') + '</label><input id="tr-session" value="' + sanitize(s.Session || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Profil cible' : 'Target profile') + '</label><input id="tr-profile" value="' + sanitize(s.Profile || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Vague' : 'Wave') + '</label><input id="tr-wave" value="' + sanitize(s.Wave || '') + '"></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Date' : 'Date') + '</label><input type="date" id="tr-date" value="' + fromEpoch(s.Date) + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Durée' : 'Duration') + '</label><input id="tr-dur" value="' + sanitize(s.Duration || '') + '" placeholder="' + (L ? 'ex. 1 journée' : 'e.g. 1 day') + '"></div></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Formateur' : 'Trainer') + '</label><input id="tr-trainer" value="' + sanitize(s.Trainer || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Capacité' : 'Capacity') + '</label><input type="number" min="0" id="tr-cap" value="' + (s.Capacity || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Présents' : 'Attendees') + '</label><input type="number" min="0" id="tr-att" value="' + (s.Attendees || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Statut' : 'Status') + '</label><select id="tr-status">' + statuses.map(function(x) { return '<option' + (s.Status === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.TRAIN + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveTrain(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(L ? 'Session de formation' : 'Training session', b, f);
+}
+async function saveTrain(id) {
+  var rec = { Session: document.getElementById('tr-session').value.trim(), Profile: document.getElementById('tr-profile').value.trim(), Wave: document.getElementById('tr-wave').value.trim(), Date: toEpoch(document.getElementById('tr-date').value), Duration: document.getElementById('tr-dur').value.trim(), Trainer: document.getElementById('tr-trainer').value.trim(), Capacity: parseInt(document.getElementById('tr-cap').value) || null, Attendees: parseInt(document.getElementById('tr-att').value) || null, Status: document.getElementById('tr-status').value };
+  if (!rec.Session) { showToast(currentLang === 'fr' ? 'Intitulé requis' : 'Title required', 'error'); return; }
+  await saveRow(T.TRAIN, id, rec);
+}
+function procStatusCls(s) { return s === 'intégré' ? 'badge-could' : s === 'en cours' ? 'badge-should' : 'badge-wont'; }
+function renderProcesses() {
+  var L = currentLang === 'fr';
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🔄 ' + t('tabProcesses') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openProcModal()">+ ' + (L ? 'Processus' : 'Process') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.proc.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  html += '</div>';
+
+  data.proc.forEach(function(p) {
+    html += '<div class="section-card">';
+    html += '<div class="section-title" style="justify-content:space-between;"><span>' + sanitize(p.Name || '') + ' <span class="badge ' + procStatusCls(p.IntegrationStatus) + '">' + sanitize(p.IntegrationStatus || '') + '</span></span>';
+    if (canEdit) html += '<span><button class="btn-icon" onclick="openProcModal(' + p.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.PROC + '\',' + p.id + ')">🗑️</button></span>';
+    html += '</div>';
+    if (p.Context) html += '<p style="color:#64748b;margin-bottom:12px;">' + sanitize(p.Context) + '</p>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">';
+    html += '<div style="background:#fef2f2;border-radius:10px;padding:12px;"><div style="font-weight:800;color:#b91c1c;margin-bottom:6px;">⚠️ As-Is</div><div style="font-size:12px;white-space:pre-wrap;">' + sanitize(p.AsIs || '—') + '</div>' + (p.PainPoints ? '<div style="font-size:11px;color:#b91c1c;margin-top:8px;"><strong>' + (L ? 'Points de douleur :' : 'Pain points:') + '</strong> ' + sanitize(p.PainPoints) + '</div>' : '') + '</div>';
+    html += '<div style="background:#f0fdf4;border-radius:10px;padding:12px;"><div style="font-weight:800;color:#15803d;margin-bottom:6px;">✅ To-Be (SIPI)</div><div style="font-size:12px;white-space:pre-wrap;">' + sanitize(p.ToBe || '—') + '</div>' + (p.Gains ? '<div style="font-size:11px;color:#15803d;margin-top:8px;"><strong>' + (L ? 'Gains :' : 'Gains:') + '</strong> ' + sanitize(p.Gains) + '</div>' : '') + '</div>';
+    html += '</div>';
+    if (p.ConfigRequired) html += '<div style="background:#eef2ff;border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12px;"><strong>⚙️ ' + (L ? 'Paramétrage SIPI requis :' : 'Required SIPI config:') + '</strong> ' + sanitize(p.ConfigRequired) + '</div>';
+    html += '</div>';
+  });
+  document.getElementById('view-processes').innerHTML = html;
+}
+function openProcModal(id) {
+  if (!canEdit) return;
+  var p = id ? data.proc.find(function(x) { return x.id === id; }) : { IntegrationStatus: 'à analyser' };
+  var L = currentLang === 'fr';
+  var statuses = ['à analyser', 'en cours', 'intégré'];
+  var b = '<div class="form-row"><div class="form-group"><label>' + (L ? 'Nom du processus' : 'Process name') + '</label><input id="pr-name" value="' + sanitize(p.Name || '') + '"></div>';
+  b += '<div class="form-group" style="max-width:160px;"><label>' + (L ? 'Intégration' : 'Integration') + '</label><select id="pr-status">' + statuses.map(function(s) { return '<option' + (p.IntegrationStatus === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Contexte / enjeux' : 'Context') + '</label><textarea id="pr-ctx" rows="2">' + sanitize(p.Context || '') + '</textarea></div>';
+  b += '<div class="form-row"><div class="form-group"><label>As-Is</label><textarea id="pr-asis" rows="3">' + sanitize(p.AsIs || '') + '</textarea></div>';
+  b += '<div class="form-group"><label>To-Be</label><textarea id="pr-tobe" rows="3">' + sanitize(p.ToBe || '') + '</textarea></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (L ? 'Points de douleur' : 'Pain points') + '</label><textarea id="pr-pain" rows="2">' + sanitize(p.PainPoints || '') + '</textarea></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Gains attendus' : 'Expected gains') + '</label><textarea id="pr-gains" rows="2">' + sanitize(p.Gains || '') + '</textarea></div></div>';
+  b += '<div class="form-group"><label>' + (L ? 'Paramétrage SIPI requis' : 'Required SIPI config') + '</label><textarea id="pr-cfg" rows="2">' + sanitize(p.ConfigRequired || '') + '</textarea></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.PROC + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveProc(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(L ? 'Processus métier' : 'Business process', b, f);
+}
+async function saveProc(id) {
+  var rec = { Name: document.getElementById('pr-name').value.trim(), IntegrationStatus: document.getElementById('pr-status').value, Context: document.getElementById('pr-ctx').value.trim(), AsIs: document.getElementById('pr-asis').value.trim(), ToBe: document.getElementById('pr-tobe').value.trim(), PainPoints: document.getElementById('pr-pain').value.trim(), Gains: document.getElementById('pr-gains').value.trim(), ConfigRequired: document.getElementById('pr-cfg').value.trim() };
+  if (!rec.Name) { showToast(currentLang === 'fr' ? 'Nom requis' : 'Name required', 'error'); return; }
+  await saveRow(T.PROC, id, rec);
+}
 
 // =============================================================================
 // BOOT
