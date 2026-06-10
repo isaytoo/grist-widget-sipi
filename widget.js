@@ -216,7 +216,10 @@ function renderDashboard() {
   var phasesInProgress = data.phase.filter(function(p) { return p.Status === 'en cours'; }).length;
   var decOpen = data.dec.filter(function(d) { return d.Status !== 'close'; }).length;
 
-  var html = '<div class="section-card"><div class="section-title">📊 ' + t('dashTitle') + '</div>';
+  var isEmpty = !data.req.length && !data.phase.length && !data.risk.length && !data.proc.length;
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>📊 ' + t('dashTitle') + '</span>';
+  if (canEdit && isEmpty) html += '<button class="btn btn-primary btn-sm" onclick="seedDemoData()">✨ ' + (currentLang === 'fr' ? 'Charger les données d\'exemple' : 'Load sample data') + '</button>';
+  html += '</div>';
   html += '<div class="kpi-grid">';
   html += kpi(data.req.length, t('kpiReqTotal'), '');
   html += kpi(mustLeft, t('kpiReqMust'), mustLeft > 0 ? 'warn' : 'ok');
@@ -793,6 +796,141 @@ async function saveProc(id) {
   var rec = { Name: document.getElementById('pr-name').value.trim(), IntegrationStatus: document.getElementById('pr-status').value, Context: document.getElementById('pr-ctx').value.trim(), AsIs: document.getElementById('pr-asis').value.trim(), ToBe: document.getElementById('pr-tobe').value.trim(), PainPoints: document.getElementById('pr-pain').value.trim(), Gains: document.getElementById('pr-gains').value.trim(), ConfigRequired: document.getElementById('pr-cfg').value.trim() };
   if (!rec.Name) { showToast(currentLang === 'fr' ? 'Nom requis' : 'Name required', 'error'); return; }
   await saveRow(T.PROC, id, rec);
+}
+
+// =============================================================================
+// EXPORTS (PDF de la vue courante / Excel des données)
+// =============================================================================
+function exportCurrentViewPdf() {
+  var el = document.getElementById('view-' + currentTab);
+  if (!el || typeof html2canvas === 'undefined' || !window.jspdf) { showToast(currentLang === 'fr' ? 'Export indisponible' : 'Export unavailable', 'error'); return; }
+  showToast(currentLang === 'fr' ? 'Génération du PDF...' : 'Generating PDF...', 'info');
+  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', windowWidth: el.scrollWidth }).then(function(canvas) {
+    var img = canvas.toDataURL('image/png');
+    var jsPDF = window.jspdf.jsPDF;
+    var w = canvas.width, h = canvas.height;
+    var pdf = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'px', format: [w, h], hotfixes: ['px_scaling'] });
+    pdf.addImage(img, 'PNG', 0, 0, w, h);
+    pdf.save('Cockpit_SI_' + currentTab + '_' + new Date().toISOString().split('T')[0] + '.pdf');
+    showToast(currentLang === 'fr' ? 'PDF exporté ✓' : 'PDF exported ✓', 'success');
+  }).catch(function(e) { showToast('Erreur PDF: ' + e.message, 'error'); });
+}
+function exportCurrentExcel() {
+  if (typeof XLSX === 'undefined') { showToast(currentLang === 'fr' ? 'Export indisponible' : 'Export unavailable', 'error'); return; }
+  var wb = XLSX.utils.book_new();
+  function addSheet(name, rows) {
+    if (!rows || !rows.length) return;
+    var clean = rows.map(function(r) { var o = Object.assign({}, r); delete o.id; return o; });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clean), name.substring(0, 31));
+  }
+  if (currentTab === 'governance') { addSheet('RACI', data.raci); addSheet('Instances', data.inst); addSheet('Decisions', data.dec); }
+  else if (currentTab === 'data') { addSheet('Qualite', data.dq); addSheet('Roles', data.drole); addSheet('Anomalies', data.dano); }
+  else if (currentTab === 'dashboard') { addSheet('Exigences', data.req); addSheet('Risques', data.risk); addSheet('Phases', data.phase); }
+  else { var m = { requirements: data.req, roadmap: data.phase, risks: data.risk, training: data.train, processes: data.proc }; addSheet(currentTab, m[currentTab]); }
+  if (!wb.SheetNames.length) { showToast(currentLang === 'fr' ? 'Rien à exporter' : 'Nothing to export', 'error'); return; }
+  XLSX.writeFile(wb, 'Cockpit_SI_' + currentTab + '_' + new Date().toISOString().split('T')[0] + '.xlsx');
+  showToast(currentLang === 'fr' ? 'Excel exporté ✓' : 'Excel exported ✓', 'success');
+}
+
+// =============================================================================
+// JEU DE DONNÉES D'EXEMPLE (basé sur les documents SIPI Métropole de Lyon)
+// =============================================================================
+async function seedDemoData() {
+  if (!canEdit) { showToast(currentLang === 'fr' ? 'Lecture seule' : 'Read-only', 'error'); return; }
+  if (!confirm(currentLang === 'fr' ? 'Charger un jeu de données d\'exemple dans les tables vides ?' : 'Load sample data into empty tables?')) return;
+  var E = toEpoch;
+  var seeds = [
+    [T.REQ, data.req, [
+      { Code: 'EXF-01', Title: 'Référentiel patrimonial hiérarchisé', Domain: 'Référentiel', Priority: 'must', Rule: 'Territoire → Commune → Site → Bâtiment → Niveau → Local → Équipement', Status: 'validée', Owner: 'CDP Fonctionnel' },
+      { Code: 'EXF-02', Title: "Fiche d'identité normalisée des biens", Domain: 'Référentiel', Priority: 'must', Rule: 'Blocs identification, caractéristiques, juridique, état/vétusté, performance', Status: 'paramétrée', Owner: 'Data Owner Patrimoine' },
+      { Code: 'EXF-03', Title: 'Portail usager de déclaration', Domain: 'Usagers', Priority: 'must', Rule: 'Numérotation auto + accusé de réception immédiat', Status: 'validée', Owner: 'CDP Fonctionnel' },
+      { Code: 'EXF-04', Title: 'Calcul automatique du SLA', Domain: 'GMAO', Priority: 'must', Rule: 'Selon type et priorité P1 à P4', Status: 'à spécifier', Owner: 'Référent GMAO' },
+      { Code: 'EXF-05', Title: 'Rattachement OT au bien et à l\'équipement', Domain: 'GMAO', Priority: 'must', Rule: 'Lien obligatoire vers le référentiel patrimonial', Status: 'à spécifier', Owner: 'Référent GMAO' },
+      { Code: 'EXF-06', Title: 'Affectation guidée par compétences', Domain: 'GMAO', Priority: 'should', Rule: 'Annuaire intervenants + habilitations', Status: 'à spécifier', Owner: 'Référent GMAO' },
+      { Code: 'EXF-07', Title: 'Plan de maintenance préventive (PMP)', Domain: 'GMAO', Priority: 'should', Rule: 'Génération automatique des OT préventifs', Status: 'à spécifier', Owner: 'Référent maintenance' },
+      { Code: 'EXF-08', Title: 'Tableaux de bord KPI temps réel', Domain: 'Pilotage', Priority: 'should', Rule: 'Délais, taux de résolution, satisfaction', Status: 'à spécifier', Owner: 'Manager' },
+      { Code: 'EXF-09', Title: 'Interface cartographique SIG', Domain: 'SIG', Priority: 'could', Rule: 'Localisation des biens et interventions', Status: 'à spécifier', Owner: 'Correspondant SIG' },
+      { Code: 'EXF-10', Title: 'Consolidation budgétaire multi-sites', Domain: 'Pilotage', Priority: 'wont', Rule: 'Hors périmètre Phase 1', Status: 'à spécifier', Owner: 'DAF' }
+    ]],
+    [T.PHASE, data.phase, [
+      { Name: 'Phase 0 — Cadrage & Diagnostic', Phase_Num: 0, Start_Date: E('2025-09-01'), End_Date: E('2025-10-31'), Status: 'terminée', Deliverable: 'Note de cadrage, audit data', Wave: '' },
+      { Name: 'Phase 1 — Conception fonctionnelle', Phase_Num: 1, Start_Date: E('2025-11-01'), End_Date: E('2026-01-31'), Status: 'terminée', Deliverable: 'CDCF validé', Wave: '' },
+      { Name: 'Phase 2a — Pilote', Phase_Num: 2, Start_Date: E('2026-02-01'), End_Date: E('2026-04-30'), Status: 'terminée', Deliverable: 'Pilote Patrimoine + Collèges', Wave: 'Vague 1' },
+      { Name: 'Phase 2b — Déploiement élargi', Phase_Num: 3, Start_Date: E('2026-05-01'), End_Date: E('2026-07-31'), Status: 'en cours', Deliverable: 'Directions gestionnaires', Wave: 'Vague 2' },
+      { Name: 'Phase 2c — Généralisation', Phase_Num: 4, Start_Date: E('2026-08-01'), End_Date: E('2026-10-31'), Status: 'à venir', Deliverable: 'Tous périmètres', Wave: 'Vague 3' },
+      { Name: 'Phase 3 — Exploitation & Run', Phase_Num: 5, Start_Date: E('2026-11-01'), End_Date: E('2027-02-28'), Status: 'à venir', Deliverable: 'Mise en exploitation', Wave: '' }
+    ]],
+    [T.RISK, data.risk, [
+      { Title: 'Résistance au changement des utilisateurs', Probability: 2, Impact: 3, Mitigation: 'Conduite du changement, implication précoce des référents', Owner: 'CDP Fonctionnel', Status: 'ouvert' },
+      { Title: 'Qualité insuffisante des données initiales', Probability: 3, Impact: 3, Mitigation: 'Audit data préalable, plan de reprise, sprints de fiabilisation', Owner: 'Data Manager', Status: 'ouvert' },
+      { Title: 'Périmètre fonctionnel mal défini', Probability: 2, Impact: 3, Mitigation: 'Ateliers MoSCoW, validation formelle des specs', Owner: 'CDP Fonctionnel', Status: 'maîtrisé' },
+      { Title: 'Dépendances techniques éditeur logiciel', Probability: 1, Impact: 2, Mitigation: 'SLA contractualisés, suivi hebdomadaire éditeur', Owner: 'CDP Informatique', Status: 'maîtrisé' },
+      { Title: 'Turnover dans les équipes projet', Probability: 1, Impact: 2, Mitigation: 'Documentation systématique, partage de connaissances', Owner: 'CDP Fonctionnel', Status: 'ouvert' }
+    ]],
+    [T.RACI, data.raci, [
+      { Activity: 'Recueil des besoins métiers', R: 'CDP Fonct.', A: 'Dir. Métier', C: 'CDP Info.', I: 'DSI, DGA', Order: 1 },
+      { Activity: 'Paramétrage du logiciel', R: 'CDP Info.', A: 'CDP Fonct.', C: 'Dir. Métier', I: 'DSI', Order: 2 },
+      { Activity: 'Gouvernance des données', R: 'CDP Fonct.', A: 'Dir. Métier', C: 'CDP Info.', I: 'DSI', Order: 3 },
+      { Activity: 'Architecture technique', R: 'CDP Info.', A: 'DSI', C: 'CDP Fonct.', I: 'DGA', Order: 4 },
+      { Activity: 'Plan de formation', R: 'CDP Fonct.', A: 'Dir. Métier', C: 'CDP Info.', I: 'DSI', Order: 5 },
+      { Activity: 'Validation fonctionnelle', R: 'Dir. Métier', A: 'CDP Fonct.', C: 'CDP Info.', I: 'DSI', Order: 6 },
+      { Activity: 'Arbitrages budgétaires', R: 'DGA', A: 'DGA', C: 'CDP Fonct., Dir. Métier', I: 'DSI', Order: 7 },
+      { Activity: 'Reporting stratégique', R: 'CDP Fonct.', A: 'Dir. Métier', C: 'CDP Info.', I: 'DGA', Order: 8 }
+    ]],
+    [T.INST, data.inst, [
+      { Name: 'Comité de pilotage', Composition: 'DGA, DSI, Directrice Patrimoine', Frequency: 'Trimestrielle', Next_Date: E('2026-06-25'), Role: 'Arbitrages stratégiques, validation feuille de route' },
+      { Name: 'Comité de projet', Composition: 'CDP fonctionnel + informatique, référents métiers', Frequency: 'Mensuelle', Next_Date: E('2026-06-18'), Role: 'Suivi avancement, levée des points bloquants' },
+      { Name: 'Ateliers métiers', Composition: 'CDP fonctionnel, utilisateurs-clés', Frequency: 'Bimensuelle', Next_Date: E('2026-06-16'), Role: 'Recueil besoins, validation fonctionnelle' },
+      { Name: 'Comité data', Composition: 'CDP fonctionnel, propriétaires de données', Frequency: 'Mensuelle', Next_Date: E('2026-06-23'), Role: 'Qualité des données, gouvernance' }
+    ]],
+    [T.DEC, data.dec, [
+      { Date: E('2026-05-20'), Instance: 'Comité de projet', Decision: 'Priorisation MoSCoW des exigences GMAO validée', Action: 'Figer le périmètre Phase 2b', Responsible: 'CDP Fonctionnel', Due_Date: E('2026-06-15'), Status: 'en cours' },
+      { Date: E('2026-05-06'), Instance: 'Comité data', Decision: 'Lancement des sprints de fiabilisation des données Collèges', Action: 'Audit complétude par Data Steward', Responsible: 'Data Manager', Due_Date: E('2026-06-30'), Status: 'ouverte' },
+      { Date: E('2026-04-15'), Instance: 'Comité de pilotage', Decision: 'Validation du passage en déploiement élargi (vague 2)', Action: '', Responsible: 'DGA', Due_Date: null, Status: 'close' }
+    ]],
+    [T.DQ, data.dq, [
+      { Perimeter: 'Direction Patrimoine', Completeness: 86, Accuracy: 78, Consistency: 82, Freshness: 7, Traceability: 90, Updated_At: E('2026-06-01') },
+      { Perimeter: 'Direction des Collèges', Completeness: 62, Accuracy: 55, Consistency: 60, Freshness: 21, Traceability: 70, Updated_At: E('2026-06-01') },
+      { Perimeter: 'Sites tertiaires', Completeness: 74, Accuracy: 70, Consistency: 76, Freshness: 12, Traceability: 80, Updated_At: E('2026-06-01') }
+    ]],
+    [T.DROLE, data.drole, [
+      { Role: 'Data Owner', Person: 'Directrice du Patrimoine', Perimeter: 'Patrimoine immobilier' },
+      { Role: 'Data Steward', Person: 'Correspondant applicatif Patrimoine', Perimeter: 'Patrimoine immobilier' },
+      { Role: 'Data Producer', Person: 'Agents terrain & administratifs', Perimeter: 'Tous sites' },
+      { Role: 'Data Manager', Person: 'CDP fonctionnel SIPI', Perimeter: 'Global' },
+      { Role: 'Data Architect', Person: 'CDP informatique', Perimeter: 'Modèle de données' }
+    ]],
+    [T.DANO, data.dano, [
+      { Description: 'Surfaces manquantes sur 38% des bâtiments Collèges', Perimeter: 'Direction des Collèges', Dimension: 'Complétude', Severity: 'forte', Status: 'ouverte' },
+      { Description: 'Doublons de codes bâtiment détectés', Perimeter: 'Sites tertiaires', Dimension: 'Cohérence', Severity: 'moyenne', Status: 'ouverte' },
+      { Description: 'Indices de vétusté non mis à jour depuis 2 ans', Perimeter: 'Direction Patrimoine', Dimension: 'Actualité', Severity: 'moyenne', Status: 'corrigée' }
+    ]],
+    [T.TRAIN, data.train, [
+      { Session: 'Formateurs internes (référents applicatifs)', Profile: 'Référents applicatifs', Wave: 'Vague 1', Date: E('2026-02-10'), Duration: '3 jours', Trainer: 'Éditeur + CDP', Capacity: 8, Attendees: 7, Status: 'réalisée' },
+      { Session: 'Managers & Directeurs', Profile: 'Managers / Directeurs', Wave: 'Vague 1', Date: E('2026-03-12'), Duration: '½ journée', Trainer: 'Formateurs internes', Capacity: 60, Attendees: 48, Status: 'réalisée' },
+      { Session: 'Agents patrimoine & maintenance', Profile: 'Agents opérationnels', Wave: 'Vague 1', Date: E('2026-03-20'), Duration: '1 journée', Trainer: 'Formateurs internes', Capacity: 120, Attendees: 104, Status: 'réalisée' },
+      { Session: 'Agents administratifs', Profile: 'Agents administratifs', Wave: 'Vague 2', Date: E('2026-06-18'), Duration: '1 journée', Trainer: 'Formateurs internes', Capacity: 80, Attendees: null, Status: 'planifiée' },
+      { Session: 'Correspondants SIG', Profile: 'Correspondants SIG', Wave: 'Vague 2', Date: E('2026-06-25'), Duration: '½ journée', Trainer: 'CDP', Capacity: 10, Attendees: null, Status: 'planifiée' }
+    ]],
+    [T.PROC, data.proc, [
+      { Name: "Demande d'intervention (DI) et Ordre de travail (OT)", IntegrationStatus: 'en cours', Context: "Processus le plus fréquent de la GMAO ; plusieurs centaines d'OT/mois.", AsIs: 'Signalements par tél/mail, OT créés manuellement (tableur/papier), affectation informelle, clôture non tracée, aucun reporting.', ToBe: 'Déclaration via portail, numéro de ticket immédiat, qualification & SLA auto, OT rattaché au bien, clôture tracée, KPI temps réel.', PainPoints: 'Non-traçabilité, perte de SLA, insatisfaction usager', Gains: 'Traçabilité, respect SLA, satisfaction mesurée', ConfigRequired: 'Formulaire DI, table des SLA P1-P4, annuaire intervenants, workflow OT' },
+      { Name: 'Maintenance préventive (PMP)', IntegrationStatus: 'à analyser', Context: 'Planification des interventions préventives par équipement.', AsIs: 'Plans dispersés, pas de déclenchement automatique.', ToBe: 'Génération automatique des OT préventifs selon gammes & périodicités.', PainPoints: 'Oublis, interventions tardives', Gains: 'Anticipation, réduction du correctif', ConfigRequired: 'Gammes de maintenance, périodicités, calendrier préventif' },
+      { Name: 'Gestion du référentiel patrimonial', IntegrationStatus: 'en cours', Context: 'Création / mise à jour des biens.', AsIs: 'Données fragmentées, codification hétérogène, mises à jour tardives.', ToBe: 'Référentiel unique, codification normalisée, règles de mise à jour avec délais.', PainPoints: 'Doublons, incohérences', Gains: 'Référentiel fiable et partagé', ConfigRequired: 'Arborescence, règles de nommage, droits par direction' },
+      { Name: "Cession / Acquisition d'un bien", IntegrationStatus: 'à analyser', Context: "Évolution du parc.", AsIs: 'Mise à jour manuelle, délais variables.', ToBe: 'Workflow avec délais (J+5 acquisition, J+2 cession) et validation Data Owner.', PainPoints: 'Désynchronisation du référentiel', Gains: 'Référentiel à jour, traçabilité', ConfigRequired: 'Workflow cession/acquisition, alertes de délai' },
+      { Name: 'Pilotage et reporting', IntegrationStatus: 'à analyser', Context: 'Production des indicateurs de pilotage.', AsIs: 'Reporting manuel, données ressaisies, délais longs.', ToBe: 'Tableaux de bord temps réel, KPI patrimoniaux et maintenance.', PainPoints: 'Reporting chronophage, peu fiable', Gains: 'Décision outillée, gain de temps', ConfigRequired: 'Indicateurs, droits de lecture, rafraîchissement auto' }
+    ]]
+  ];
+  try {
+    var total = 0;
+    for (var i = 0; i < seeds.length; i++) {
+      var table = seeds[i][0], existing = seeds[i][1], rows = seeds[i][2];
+      if (existing && existing.length) continue; // ne pas dupliquer
+      var actions = rows.map(function(r) { return ['AddRecord', table, null, r]; });
+      if (actions.length) { await grist.docApi.applyUserActions(actions); total += actions.length; }
+    }
+    showToast((currentLang === 'fr' ? 'Jeu de démo chargé : ' : 'Demo data loaded: ') + total, 'success');
+    await loadAll();
+  } catch (e) { showToast('Erreur seed: ' + e.message, 'error'); }
 }
 
 // =============================================================================
