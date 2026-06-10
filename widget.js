@@ -95,6 +95,20 @@ function openModal(title, bodyHtml, footerHtml) {
 }
 function closeModalForce() { document.getElementById('modal-container').innerHTML = ''; }
 
+// CRUD génériques
+async function saveRow(table, id, rec) {
+  try {
+    if (id) await grist.docApi.applyUserActions([['UpdateRecord', table, id, rec]]);
+    else await grist.docApi.applyUserActions([['AddRecord', table, null, rec]]);
+    showToast(t('saved'), 'success'); closeModalForce(); await loadAll();
+  } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
+async function deleteRow(table, id) {
+  if (!confirm(t('confirmDelete'))) return;
+  try { await grist.docApi.applyUserActions([['RemoveRecord', table, id]]); showToast(t('deleted'), 'success'); closeModalForce(); await loadAll(); }
+  catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
+
 function fromEpoch(s) { if (!s) return ''; return new Date(s * 1000).toISOString().split('T')[0]; }
 function toEpoch(str) { if (!str) return null; var d = new Date(str + 'T00:00:00'); return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000); }
 function formatDate(s) { if (!s) return ''; var d = new Date(s * 1000); return d.toLocaleDateString(currentLang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }); }
@@ -355,8 +369,115 @@ async function deleteReq(id) {
 // =============================================================================
 // MODULES À VENIR (placeholders — implémentés dans les prochains incréments)
 // =============================================================================
-function renderRoadmap() { placeholder('view-roadmap', '🗺️', t('tabRoadmap')); }
-function renderRisks() { placeholder('view-risks', '⚠️', t('tabRisks')); }
+function phaseStatusColor(s) { return s === 'terminée' ? '#22c55e' : s === 'en cours' ? '#4f46e5' : '#94a3b8'; }
+function renderRoadmap() {
+  var phases = data.phase.slice().sort(function(a, b) { return (a.Phase_Num || 0) - (b.Phase_Num || 0) || (a.Start_Date || 0) - (b.Start_Date || 0); });
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🗺️ ' + t('tabRoadmap') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openPhaseModal()">+ ' + (currentLang === 'fr' ? 'Nouvelle phase' : 'New phase') + '</button>';
+  html += '</span></div>';
+  if (!phases.length) { html += '<div class="empty-hint">' + t('noData') + '</div></div>'; document.getElementById('view-roadmap').innerHTML = html; return; }
+
+  // Frise chronologique (barres proportionnelles)
+  var allDates = [];
+  phases.forEach(function(p) { if (p.Start_Date) allDates.push(p.Start_Date); if (p.End_Date) allDates.push(p.End_Date); });
+  var minD = Math.min.apply(null, allDates), maxD = Math.max.apply(null, allDates), span = Math.max(1, maxD - minD);
+  var now = Math.floor(Date.now() / 1000);
+  html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+  phases.forEach(function(p) {
+    var s = p.Start_Date || minD, e = p.End_Date || maxD;
+    var left = Math.round((s - minD) / span * 100), width = Math.max(3, Math.round((e - s) / span * 100));
+    html += '<div style="display:flex;align-items:center;gap:10px;' + (canEdit ? 'cursor:pointer;' : '') + '"' + (canEdit ? ' onclick="openPhaseModal(' + p.id + ')"' : '') + '>';
+    html += '<div style="width:230px;flex-shrink:0;font-size:12px;"><strong>' + sanitize(p.Name) + '</strong>' + (p.Wave ? ' <span class="badge badge-could">' + sanitize(p.Wave) + '</span>' : '') + '<div style="font-size:10px;color:#94a3b8;">' + formatDate(p.Start_Date) + ' → ' + formatDate(p.End_Date) + '</div></div>';
+    html += '<div style="flex:1;position:relative;height:26px;background:#f1f5f9;border-radius:6px;">';
+    html += '<div style="position:absolute;left:' + left + '%;width:' + width + '%;height:100%;background:' + phaseStatusColor(p.Status) + ';border-radius:6px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:10px;font-weight:700;overflow:hidden;white-space:nowrap;">' + sanitize(p.Deliverable || p.Status || '') + '</div>';
+    html += '</div></div>';
+  });
+  // ligne "aujourd'hui"
+  if (now >= minD && now <= maxD) {
+    var nowPct = Math.round((now - minD) / span * 100);
+    html += '<div style="margin-left:240px;position:relative;height:0;"><div style="position:absolute;left:' + nowPct + '%;top:-' + (phases.length * 34) + 'px;height:' + (phases.length * 34) + 'px;border-left:2px dashed #ef4444;"></div></div>';
+  }
+  html += '</div></div>';
+  document.getElementById('view-roadmap').innerHTML = html;
+}
+function openPhaseModal(id) {
+  if (!canEdit) return;
+  var p = id ? data.phase.find(function(x) { return x.id === id; }) : { Status: 'à venir' };
+  var statuses = ['à venir', 'en cours', 'terminée'];
+  var b = '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Nom de la phase' : 'Phase name') + '</label><input id="ph-name" value="' + sanitize(p.Name || '') + '"></div>';
+  b += '<div class="form-group" style="max-width:90px;"><label>N°</label><input type="number" id="ph-num" value="' + (p.Phase_Num || '') + '"></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Début' : 'Start') + '</label><input type="date" id="ph-start" value="' + fromEpoch(p.Start_Date) + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Fin' : 'End') + '</label><input type="date" id="ph-end" value="' + fromEpoch(p.End_Date) + '"></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Statut' : 'Status') + '</label><select id="ph-status">' + statuses.map(function(s) { return '<option' + (p.Status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Vague' : 'Wave') + '</label><input id="ph-wave" value="' + sanitize(p.Wave || '') + '"></div></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Livrable' : 'Deliverable') + '</label><input id="ph-deliv" value="' + sanitize(p.Deliverable || '') + '"></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.PHASE + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="savePhase(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal((id ? '✏️ ' : '✨ ') + (currentLang === 'fr' ? 'Phase' : 'Phase'), b, f);
+}
+async function savePhase(id) {
+  var rec = { Name: document.getElementById('ph-name').value.trim(), Phase_Num: parseInt(document.getElementById('ph-num').value) || null, Start_Date: toEpoch(document.getElementById('ph-start').value), End_Date: toEpoch(document.getElementById('ph-end').value), Status: document.getElementById('ph-status').value, Wave: document.getElementById('ph-wave').value.trim(), Deliverable: document.getElementById('ph-deliv').value.trim() };
+  if (!rec.Name) { showToast(currentLang === 'fr' ? 'Nom requis' : 'Name required', 'error'); return; }
+  await saveRow(T.PHASE, id, rec);
+}
+function pi3Label(v) { return v === 3 ? (currentLang === 'fr' ? 'Fort' : 'High') : v === 2 ? (currentLang === 'fr' ? 'Moyen' : 'Medium') : (currentLang === 'fr' ? 'Faible' : 'Low'); }
+function riskScoreColor(s) { return s >= 6 ? '#ef4444' : s >= 3 ? '#f59e0b' : '#22c55e'; }
+function renderRisks() {
+  var html = '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>⚠️ ' + t('tabRisks') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openRiskModal()">+ ' + (currentLang === 'fr' ? 'Nouveau risque' : 'New risk') + '</button>';
+  html += '</span></div>';
+
+  // Matrice de criticité 3x3 (impact en lignes, probabilité en colonnes)
+  html += '<div style="overflow-x:auto;"><table class="data-table" style="text-align:center;"><thead><tr><th style="background:#1e293b;">' + (currentLang === 'fr' ? 'Impact \\ Proba' : 'Impact \\ Prob') + '</th><th>' + pi3Label(1) + '</th><th>' + pi3Label(2) + '</th><th>' + pi3Label(3) + '</th></tr></thead><tbody>';
+  [3, 2, 1].forEach(function(imp) {
+    html += '<tr><td style="background:#312e81;color:#fff;font-weight:700;">' + pi3Label(imp) + '</td>';
+    [1, 2, 3].forEach(function(prob) {
+      var cell = data.risk.filter(function(r) { return r.Impact === imp && r.Probability === prob && r.Status !== 'clos'; });
+      var sc = imp * prob;
+      html += '<td style="background:' + riskScoreColor(sc) + '22;min-width:120px;height:64px;vertical-align:top;">';
+      cell.forEach(function(r) { html += '<div style="background:' + riskScoreColor(sc) + ';color:#fff;border-radius:6px;padding:2px 6px;font-size:10px;margin:2px;cursor:' + (canEdit ? 'pointer' : 'default') + ';"' + (canEdit ? ' onclick="openRiskModal(' + r.id + ')"' : '') + '>' + sanitize(r.Title) + '</div>'; });
+      html += '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+
+  // Liste détaillée
+  html += '<div class="section-card"><div class="section-title">📑 ' + (currentLang === 'fr' ? 'Registre des risques' : 'Risk register') + '</div>';
+  if (!data.risk.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (currentLang === 'fr' ? 'Risque' : 'Risk') + '</th><th>' + (currentLang === 'fr' ? 'Proba' : 'Prob') + '</th><th>Impact</th><th>Score</th><th>' + (currentLang === 'fr' ? 'Mitigation' : 'Mitigation') + '</th><th>' + (currentLang === 'fr' ? 'Porteur' : 'Owner') + '</th><th>' + (currentLang === 'fr' ? 'Statut' : 'Status') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.risk.slice().sort(function(a, b) { return (b.Probability * b.Impact) - (a.Probability * a.Impact); }).forEach(function(r) {
+      var sc = (r.Probability || 0) * (r.Impact || 0);
+      html += '<tr><td><strong>' + sanitize(r.Title) + '</strong></td><td>' + pi3Label(r.Probability) + '</td><td>' + pi3Label(r.Impact) + '</td>';
+      html += '<td><span class="badge" style="background:' + riskScoreColor(sc) + ';color:#fff;">' + sc + '</span></td>';
+      html += '<td>' + sanitize(r.Mitigation || '') + '</td><td>' + sanitize(r.Owner || '') + '</td><td>' + sanitize(r.Status || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openRiskModal(' + r.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.RISK + '\',' + r.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-risks').innerHTML = html;
+}
+function openRiskModal(id) {
+  if (!canEdit) return;
+  var r = id ? data.risk.find(function(x) { return x.id === id; }) : { Probability: 2, Impact: 2, Status: 'ouvert' };
+  var sel3 = function(idAttr, val) { return '<select id="' + idAttr + '">' + [1, 2, 3].map(function(v) { return '<option value="' + v + '"' + (val === v ? ' selected' : '') + '>' + pi3Label(v) + '</option>'; }).join('') + '</select>'; };
+  var statuses = ['ouvert', 'maîtrisé', 'clos'];
+  var b = '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Risque' : 'Risk') + '</label><input id="rk-title" value="' + sanitize(r.Title || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Probabilité' : 'Probability') + '</label>' + sel3('rk-prob', r.Probability || 2) + '</div>';
+  b += '<div class="form-group"><label>Impact</label>' + sel3('rk-impact', r.Impact || 2) + '</div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Statut' : 'Status') + '</label><select id="rk-status">' + statuses.map(function(s) { return '<option' + (r.Status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Mitigation' : 'Mitigation') + '</label><textarea id="rk-mit" rows="2">' + sanitize(r.Mitigation || '') + '</textarea></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Porteur' : 'Owner') + '</label><input id="rk-owner" value="' + sanitize(r.Owner || '') + '"></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.RISK + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveRisk(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal((id ? '✏️ ' : '✨ ') + (currentLang === 'fr' ? 'Risque' : 'Risk'), b, f);
+}
+async function saveRisk(id) {
+  var rec = { Title: document.getElementById('rk-title').value.trim(), Probability: parseInt(document.getElementById('rk-prob').value), Impact: parseInt(document.getElementById('rk-impact').value), Status: document.getElementById('rk-status').value, Mitigation: document.getElementById('rk-mit').value.trim(), Owner: document.getElementById('rk-owner').value.trim() };
+  if (!rec.Title) { showToast(currentLang === 'fr' ? 'Titre requis' : 'Title required', 'error'); return; }
+  await saveRow(T.RISK, id, rec);
+}
 function renderGovernance() { placeholder('view-governance', '👥', t('tabGovernance')); }
 function renderData() { placeholder('view-data', '🧬', t('tabData')); }
 function renderTraining() { placeholder('view-training', '🎓', t('tabTraining')); }
