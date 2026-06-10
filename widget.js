@@ -913,7 +913,7 @@ function renderContributorMode() {
 
   var per = myReferent.Perimeter, dom = myReferent.Domain;
   var html = '<div style="padding:22px;">';
-  html += '<div class="section-card" style="border-left:4px solid #4f46e5;"><div style="font-size:13px;color:#64748b;">' + (L ? 'Bienvenue' : 'Welcome') + ' <strong>' + sanitize(myReferent.Name || currentUserEmail) + '</strong></div><div style="font-size:18px;font-weight:800;color:#312e81;">' + (L ? 'Périmètre :' : 'Scope:') + ' ' + sanitize(per) + ' <span class="badge badge-could">' + sanitize(dom) + '</span></div></div>';
+  html += '<div class="section-card" style="border-left:4px solid #4f46e5;display:flex;justify-content:space-between;align-items:center;gap:12px;"><div><div style="font-size:13px;color:#64748b;">' + (L ? 'Bienvenue' : 'Welcome') + ' <strong>' + sanitize(myReferent.Name || currentUserEmail) + '</strong></div><div style="font-size:18px;font-weight:800;color:#312e81;">' + (L ? 'Périmètre :' : 'Scope:') + ' ' + sanitize(per) + ' <span class="badge badge-could">' + sanitize(dom) + '</span></div></div><button class="btn btn-secondary btn-sm" onclick="contribHelp()">❓ ' + (L ? 'Aide' : 'Help') + '</button></div>';
 
   // 1) Qualité de mes données
   var myDq = data.dq.find(function(d) { return (d.Perimeter || '') === per; });
@@ -974,6 +974,31 @@ function renderContributorMode() {
   html += '</div>';
   cv.innerHTML = html;
 }
+// Aide ciblée pour le référent (mode contributeur)
+function contribHelp() {
+  var L = currentLang === 'fr';
+  var per = myReferent ? myReferent.Perimeter : '', dom = myReferent ? myReferent.Domain : '';
+  var b = '';
+  if (L) {
+    b += '<p style="margin-bottom:12px;">Vous êtes <strong>référent métier</strong> pour le périmètre <strong>' + sanitize(per) + '</strong>. Vous saisissez ici les informations de votre direction : elles remontent automatiquement au chef de projet. Voici les 4 sections :</p>';
+    b += '<div style="margin-bottom:12px;"><strong>🧬 Qualité de mes données</strong><br>Évaluez la fiabilité de vos données sur 5 critères (notés en %, sauf l\'actualité en jours) :<ul style="margin:6px 0 0 18px;">';
+    b += '<li><strong>Complétude</strong> : part des champs obligatoires remplis (100 % = rien ne manque).</li>';
+    b += '<li><strong>Exactitude</strong> : les valeurs correspondent-elles à la réalité du terrain ?</li>';
+    b += '<li><strong>Cohérence</strong> : absence de doublons / contradictions (100 % = aucune).</li>';
+    b += '<li><strong>Traçabilité</strong> : sait-on qui a modifié quoi et quand ?</li>';
+    b += '<li><strong>Actualité</strong> : délai moyen de mise à jour, <em>en jours</em> (plus c\'est bas, mieux c\'est).</li></ul>';
+    b += 'Renseignez ce que vous pouvez estimer, puis cliquez <strong>Enregistrer</strong>.</div>';
+    b += '<div style="margin-bottom:12px;"><strong>🐞 Mes anomalies</strong><br>Signalez un problème détecté sur vos données (champ vide, doublon, valeur fausse…). Indiquez la <em>dimension</em> concernée et la <em>sévérité</em> (faible/moyenne/forte). Quand c\'est réglé, cliquez <strong>Corrigée</strong>.</div>';
+    b += '<div style="margin-bottom:12px;"><strong>📋 Exigences de mon domaine (' + sanitize(dom) + ')</strong><br>Une <em>exigence</em> est un besoin auquel le futur outil doit répondre. Relisez celles de votre domaine ; si elle correspond bien à votre besoin réel, cliquez <strong>Valider</strong>. (Les priorités Must/Should/Could/Won\'t indiquent l\'importance : <strong>Must</strong> = indispensable, <strong>Should</strong> = important, <strong>Could</strong> = souhaitable, <strong>Won\'t</strong> = exclu pour l\'instant.)</div>';
+    b += '<div style="margin-bottom:4px;"><strong>🎓 Présences de mes formations</strong><br>Pour chaque session, indiquez le <em>nombre réel de participants</em> puis cliquez 💾. La session passe en « réalisée ».</div>';
+    b += '<p style="margin-top:12px;color:#64748b;font-size:12px;">💡 Chaque enregistrement notifie le chef de projet. Vous pouvez revenir corriger vos saisies à tout moment.</p>';
+  } else {
+    b += '<p>You are a <strong>business referent</strong> for scope <strong>' + sanitize(per) + '</strong>. Fill in your data here; it flows automatically to the project manager. The 4 sections: data quality (5 criteria), anomalies, requirement validation for your domain, and training attendance.</p>';
+  }
+  var f = '<button class="btn btn-primary" onclick="closeModalForce()">' + (L ? 'Compris' : 'Got it') + '</button>';
+  openModal('❓ ' + (L ? 'Aide — saisie référent' : 'Help — referent input'), b, f);
+}
+
 // Sauvegarde contributeur + notification CDP en une seule transaction
 async function contribCommit(mainActions, type, message) {
   try {
