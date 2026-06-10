@@ -31,7 +31,7 @@ var I18N = {
   fr: {
     appTitle: 'Cockpit de pilotage projet SI', appSubtitle: 'Pilotage exigences, risques, données, gouvernance, formation',
     tabDashboard: 'Tableau de bord', tabRequirements: 'Exigences', tabRoadmap: 'Feuille de route', tabRisks: 'Risques',
-    tabGovernance: 'RACI & Gouvernance', tabData: 'Qualité données', tabTraining: 'Formation', tabProcesses: 'Processus', tabReferents: 'Référents',
+    tabGovernance: 'RACI & Gouvernance', tabData: 'Qualité données', tabTraining: 'Formation', tabProcesses: 'Processus', tabReferents: 'Référents', tabHelp: 'Aide',
     add: 'Ajouter', edit: 'Modifier', del: 'Supprimer', save: 'Enregistrer', cancel: 'Annuler', close: 'Fermer',
     confirmDelete: 'Confirmer la suppression ?', saved: 'Enregistré ✓', deleted: 'Supprimé ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
     comingSoon: 'Module en cours de développement', noData: 'Aucune donnée pour le moment',
@@ -46,7 +46,7 @@ var I18N = {
   en: {
     appTitle: 'IT Project Cockpit', appSubtitle: 'Requirements, risks, data, governance, training',
     tabDashboard: 'Dashboard', tabRequirements: 'Requirements', tabRoadmap: 'Roadmap', tabRisks: 'Risks',
-    tabGovernance: 'RACI & Governance', tabData: 'Data quality', tabTraining: 'Training', tabProcesses: 'Processes', tabReferents: 'Referents',
+    tabGovernance: 'RACI & Governance', tabData: 'Data quality', tabTraining: 'Training', tabProcesses: 'Processes', tabReferents: 'Referents', tabHelp: 'Help',
     add: 'Add', edit: 'Edit', del: 'Delete', save: 'Save', cancel: 'Cancel', close: 'Close',
     confirmDelete: 'Confirm deletion?', saved: 'Saved ✓', deleted: 'Deleted ✓', exportPdf: 'Export PDF', exportExcel: 'Export Excel',
     comingSoon: 'Module under development', noData: 'No data yet',
@@ -240,7 +240,7 @@ function switchTab(tab) {
 }
 function renderCurrentTab() {
   var r = { dashboard: renderDashboard, requirements: renderRequirements, roadmap: renderRoadmap, risks: renderRisks,
-    governance: renderGovernance, data: renderData, training: renderTraining, processes: renderProcesses, referents: renderReferents };
+    governance: renderGovernance, data: renderData, training: renderTraining, processes: renderProcesses, referents: renderReferents, help: renderHelp };
   if (r[currentTab]) r[currentTab]();
 }
 function placeholder(viewId, icon, label) {
@@ -1015,6 +1015,54 @@ async function contribSaveAttendees(id) {
   var v = document.getElementById('cb-att-' + id).value;
   var s = data.train.find(function(x) { return x.id === id; });
   await contribCommit([['UpdateRecord', T.TRAIN, id, { Attendees: v === '' ? null : parseInt(v), Status: 'réalisée' }]], currentLang === 'fr' ? 'Formation' : 'Training', (currentLang === 'fr' ? 'Présences renseignées : ' : 'Attendance set: ') + (s ? s.Session : '') + ' (' + (v || 0) + ')');
+}
+
+// =============================================================================
+// AIDE (guide intégré, chargé depuis GUIDE.md) + export PDF multi-pages
+// =============================================================================
+var _helpLoaded = false;
+async function renderHelp() {
+  var view = document.getElementById('view-help');
+  var L = currentLang === 'fr';
+  if (_helpLoaded) return; // déjà chargé, on garde le rendu
+  view.innerHTML = '<div class="section-card"><div class="empty-hint">⏳ ' + (L ? 'Chargement du guide…' : 'Loading guide…') + '</div></div>';
+  try {
+    var resp = await fetch('GUIDE.md?v=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var md = await resp.text();
+    var bodyHtml = (typeof marked !== 'undefined') ? marked.parse(md) : '<pre>' + sanitize(md) + '</pre>';
+    var html = '<div class="section-card" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;">';
+    html += '<button class="btn btn-primary btn-sm" onclick="exportHelpPdf()">📄 ' + (L ? 'Télécharger le guide (PDF)' : 'Download guide (PDF)') + '</button></div>';
+    html += '<div class="section-card"><div id="help-content">' + bodyHtml + '</div></div>';
+    view.innerHTML = html;
+    _helpLoaded = true;
+  } catch (e) {
+    view.innerHTML = '<div class="section-card"><div class="empty-hint"><div style="font-size:42px;">📘</div><h3 style="color:#475569;">' + (L ? 'Guide indisponible' : 'Guide unavailable') + '</h3><p>' + (L ? 'Le fichier GUIDE.md n\'a pas pu être chargé.' : 'Could not load GUIDE.md.') + '<br><small>' + sanitize(e.message) + '</small></p></div></div>';
+  }
+}
+function exportHelpPdf() {
+  var el = document.getElementById('help-content');
+  if (!el || typeof html2canvas === 'undefined' || !window.jspdf) { showToast(currentLang === 'fr' ? 'Export indisponible' : 'Export unavailable', 'error'); return; }
+  showToast(currentLang === 'fr' ? 'Génération du PDF…' : 'Generating PDF…', 'info');
+  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', windowWidth: el.scrollWidth }).then(function(canvas) {
+    var jsPDF = window.jspdf.jsPDF;
+    var pdf = new jsPDF('p', 'mm', 'a4');
+    var pageW = 210, pageH = 297, margin = 8;
+    var imgW = pageW - margin * 2;
+    var imgH = canvas.height * imgW / canvas.width;
+    var img = canvas.toDataURL('image/png');
+    var heightLeft = imgH, position = margin;
+    pdf.addImage(img, 'PNG', margin, position, imgW, imgH);
+    heightLeft -= (pageH - margin * 2);
+    while (heightLeft > 0) {
+      position = margin - (imgH - heightLeft);
+      pdf.addPage();
+      pdf.addImage(img, 'PNG', margin, position, imgW, imgH);
+      heightLeft -= (pageH - margin * 2);
+    }
+    pdf.save('Guide_Cockpit_Projet_SI.pdf');
+    showToast(currentLang === 'fr' ? 'Guide exporté ✓' : 'Guide exported ✓', 'success');
+  }).catch(function(e) { showToast('Erreur PDF: ' + e.message, 'error'); });
 }
 
 // =============================================================================
