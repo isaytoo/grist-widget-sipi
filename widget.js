@@ -19,7 +19,8 @@ var T = {
   TRAIN: 'SIPI_Training',
   PROC: 'SIPI_Processes',
   REF: 'SIPI_Referents',
-  USERINFO: 'SIPI_UserInfo'
+  USERINFO: 'SIPI_UserInfo',
+  NOTIF: 'SIPI_Notifications'
 };
 
 // =============================================================================
@@ -71,7 +72,7 @@ function applyI18n() {
 // =============================================================================
 // DATA
 // =============================================================================
-var data = { req: [], phase: [], risk: [], raci: [], inst: [], dec: [], dq: [], drole: [], dano: [], train: [], proc: [], ref: [] };
+var data = { req: [], phase: [], risk: [], raci: [], inst: [], dec: [], dq: [], drole: [], dano: [], train: [], proc: [], ref: [], notif: [] };
 var canEdit = false;            // true pour l'Owner (cockpit complet)
 var isOwner = false, isEditor = false, currentUserEmail = '';
 var myReferent = null;          // ligne SIPI_Referents correspondant à l'utilisateur courant
@@ -131,6 +132,22 @@ function deleteRow(table, id) {
 function fromEpoch(s) { if (!s) return ''; return new Date(s * 1000).toISOString().split('T')[0]; }
 function toEpoch(str) { if (!str) return null; var d = new Date(str + 'T00:00:00'); return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000); }
 function formatDate(s) { if (!s) return ''; var d = new Date(s * 1000); return d.toLocaleDateString(currentLang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function formatDateTime(s) { if (!s) return ''; var d = new Date(s * 1000); return d.toLocaleString(currentLang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+function unreadNotifs() { return data.notif.filter(function(n) { return !n.Seen; }); }
+function updateNotifBadge() {
+  var bell = document.getElementById('notif-bell'), cnt = document.getElementById('notif-count');
+  if (!bell || !cnt) return;
+  var u = unreadNotifs().length;
+  if (isOwner && u > 0) { bell.classList.remove('hidden'); cnt.textContent = u; } else bell.classList.add('hidden');
+}
+async function markAllNotifSeen() {
+  var u = unreadNotifs();
+  if (!u.length) return;
+  try {
+    await grist.docApi.applyUserActions(u.map(function(n) { return ['UpdateRecord', T.NOTIF, n.id, { Seen: true }]; }));
+    showToast(currentLang === 'fr' ? 'Marqué comme lu' : 'Marked as read', 'success'); await loadAll();
+  } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
 
 // =============================================================================
 // GRIST INIT + TABLES
@@ -166,7 +183,8 @@ async function ensureTables() {
     [T.DANO, [{ id: 'Description', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Dimension', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Complétude', 'Exactitude', 'Cohérence', 'Actualité', 'Traçabilité'] }) }, { id: 'Severity', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['faible', 'moyenne', 'forte'] }) }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['ouverte', 'corrigée'] }) }, { id: 'Detected_At', type: 'Date' }]],
     [T.TRAIN, [{ id: 'Session', type: 'Text' }, { id: 'Profile', type: 'Text' }, { id: 'Wave', type: 'Text' }, { id: 'Date', type: 'Date' }, { id: 'Duration', type: 'Text' }, { id: 'Trainer', type: 'Text' }, { id: 'Capacity', type: 'Int' }, { id: 'Attendees', type: 'Int' }, { id: 'Status', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['planifiée', 'réalisée', 'annulée'] }) }]],
     [T.PROC, [{ id: 'Name', type: 'Text' }, { id: 'Context', type: 'Text' }, { id: 'AsIs', type: 'Text' }, { id: 'ToBe', type: 'Text' }, { id: 'PainPoints', type: 'Text' }, { id: 'Gains', type: 'Text' }, { id: 'ConfigRequired', type: 'Text' }, { id: 'IntegrationStatus', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['à analyser', 'en cours', 'intégré'] }) }]],
-    [T.REF, [{ id: 'Email', type: 'Text' }, { id: 'Name', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Domain', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'] }) }]]
+    [T.REF, [{ id: 'Email', type: 'Text' }, { id: 'Name', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Domain', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Référentiel', 'GMAO', 'Pilotage', 'Usagers', 'SIG'] }) }]],
+    [T.NOTIF, [{ id: 'Date', type: 'DateTime' }, { id: 'Author', type: 'Text' }, { id: 'Perimeter', type: 'Text' }, { id: 'Type', type: 'Text' }, { id: 'Message', type: 'Text' }, { id: 'Seen', type: 'Bool' }]]
   ];
   for (var i = 0; i < defs.length; i++) {
     if (existing.indexOf(defs[i][0]) === -1) {
@@ -204,9 +222,10 @@ async function loadAll() {
   data.train = await fetchAll(T.TRAIN);
   data.proc = await fetchAll(T.PROC);
   data.ref = await fetchAll(T.REF);
+  data.notif = await fetchAll(T.NOTIF);
   resolveMyReferent();
   if (isEditor && !isOwner) renderContributorMode();
-  else renderCurrentTab();
+  else { renderCurrentTab(); updateNotifBadge(); }
 }
 
 // =============================================================================
@@ -252,6 +271,20 @@ function renderDashboard() {
   html += kpi(phasesInProgress, t('kpiPhases'), '');
   html += kpi(decOpen, t('kpiDecisionsOpen'), decOpen > 0 ? 'warn' : 'ok');
   html += '</div></div>';
+
+  // Activité des référents (notifications)
+  if (data.notif.length) {
+    var L = currentLang === 'fr';
+    var unread = unreadNotifs().length;
+    var recent = data.notif.slice().sort(function(a, b) { return (b.Date || 0) - (a.Date || 0); }).slice(0, 12);
+    html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🔔 ' + (L ? 'Activité des référents' : 'Referents activity') + (unread ? ' <span class="badge badge-must">' + unread + ' ' + (L ? 'non lus' : 'unread') + '</span>' : '') + '</span>';
+    if (unread) html += '<button class="btn btn-secondary btn-sm" onclick="markAllNotifSeen()">✓ ' + (L ? 'Tout marquer lu' : 'Mark all read') + '</button>';
+    html += '</div><table class="data-table"><thead><tr><th>' + (L ? 'Quand' : 'When') + '</th><th>' + (L ? 'Référent' : 'Referent') + '</th><th>' + (L ? 'Périmètre' : 'Scope') + '</th><th>' + (L ? 'Type' : 'Type') + '</th><th>' + (L ? 'Détail' : 'Detail') + '</th></tr></thead><tbody>';
+    recent.forEach(function(n) {
+      html += '<tr style="' + (!n.Seen ? 'background:#eef2ff;font-weight:600;' : '') + '"><td>' + formatDateTime(n.Date) + '</td><td>' + sanitize(n.Author || '') + '</td><td>' + sanitize(n.Perimeter || '') + '</td><td><span class="badge badge-could">' + sanitize(n.Type || '') + '</span></td><td>' + sanitize(n.Message || '') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
 
   // Prochaines instances
   var upcoming = data.inst.filter(function(i) { return i.Next_Date; }).sort(function(a, b) { return a.Next_Date - b.Next_Date; }).slice(0, 5);
@@ -941,9 +974,19 @@ function renderContributorMode() {
   html += '</div>';
   cv.innerHTML = html;
 }
+// Sauvegarde contributeur + notification CDP en une seule transaction
+async function contribCommit(mainActions, type, message) {
+  try {
+    var acts = mainActions.slice();
+    acts.push(['AddRecord', T.NOTIF, null, { Date: Math.floor(Date.now() / 1000), Author: (myReferent && myReferent.Name) || currentUserEmail, Perimeter: myReferent ? myReferent.Perimeter : '', Type: type, Message: message, Seen: false }]);
+    await grist.docApi.applyUserActions(acts);
+    showToast(t('saved'), 'success'); closeModalForce(); await loadAll();
+  } catch (e) { showToast('Erreur: ' + e.message, 'error'); }
+}
 async function contribSaveDq(id) {
   var rec = { Perimeter: myReferent.Perimeter, Completeness: numVal('cb-comp'), Accuracy: numVal('cb-acc'), Consistency: numVal('cb-cons'), Traceability: numVal('cb-trac'), Freshness: numVal('cb-fresh'), Updated_At: Math.floor(Date.now() / 1000) };
-  await saveRow(T.DQ, id, rec);
+  var main = id ? [['UpdateRecord', T.DQ, id, rec]] : [['AddRecord', T.DQ, null, rec]];
+  await contribCommit(main, currentLang === 'fr' ? 'Qualité données' : 'Data quality', (currentLang === 'fr' ? 'Mesures qualité mises à jour — ' : 'Quality updated — ') + myReferent.Perimeter);
 }
 function contribAddAnomaly() {
   var L = currentLang === 'fr';
@@ -958,17 +1001,20 @@ function contribAddAnomaly() {
 async function contribSaveAnomaly() {
   var rec = { Description: document.getElementById('ca-desc').value.trim(), Perimeter: myReferent.Perimeter, Dimension: document.getElementById('ca-dim').value, Severity: document.getElementById('ca-sev').value, Status: 'ouverte', Detected_At: Math.floor(Date.now() / 1000) };
   if (!rec.Description) { showToast(currentLang === 'fr' ? 'Description requise' : 'Description required', 'error'); return; }
-  await saveRow(T.DANO, null, rec);
+  await contribCommit([['AddRecord', T.DANO, null, rec]], currentLang === 'fr' ? 'Anomalie' : 'Anomaly', (currentLang === 'fr' ? 'Anomalie signalée : ' : 'Anomaly reported: ') + rec.Description);
 }
 async function contribResolveAnomaly(id) {
-  await saveRow(T.DANO, id, { Status: 'corrigée' });
+  var a = data.dano.find(function(x) { return x.id === id; });
+  await contribCommit([['UpdateRecord', T.DANO, id, { Status: 'corrigée' }]], currentLang === 'fr' ? 'Anomalie' : 'Anomaly', (currentLang === 'fr' ? 'Anomalie corrigée : ' : 'Anomaly resolved: ') + (a ? a.Description : ''));
 }
 async function contribValidateReq(id) {
-  await saveRow(T.REQ, id, { Status: 'validée' });
+  var r = data.req.find(function(x) { return x.id === id; });
+  await contribCommit([['UpdateRecord', T.REQ, id, { Status: 'validée' }]], currentLang === 'fr' ? 'Exigence' : 'Requirement', (currentLang === 'fr' ? 'Exigence validée : ' : 'Requirement validated: ') + (r ? (r.Code ? r.Code + ' — ' : '') + r.Title : ''));
 }
 async function contribSaveAttendees(id) {
   var v = document.getElementById('cb-att-' + id).value;
-  await saveRow(T.TRAIN, id, { Attendees: v === '' ? null : parseInt(v), Status: 'réalisée' });
+  var s = data.train.find(function(x) { return x.id === id; });
+  await contribCommit([['UpdateRecord', T.TRAIN, id, { Attendees: v === '' ? null : parseInt(v), Status: 'réalisée' }]], currentLang === 'fr' ? 'Formation' : 'Training', (currentLang === 'fr' ? 'Présences renseignées : ' : 'Attendance set: ') + (s ? s.Session : '') + ' (' + (v || 0) + ')');
 }
 
 // =============================================================================

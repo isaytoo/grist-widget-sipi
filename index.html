@@ -118,6 +118,7 @@
         </div>
       </div>
       <div class="app-header-right">
+        <button id="notif-bell" class="lang-btn hidden" onclick="switchTab('dashboard')" title="Activité des référents" style="background:#fee2e2;color:#b91c1c;">🔔 <span id="notif-count">0</span></button>
         <button id="btn-export-excel" class="btn btn-secondary btn-sm" onclick="exportCurrentExcel()" title="Export Excel">📊 Excel</button>
         <button id="btn-export-pdf" class="btn btn-secondary btn-sm" onclick="exportCurrentViewPdf()" title="Export PDF">📄 PDF</button>
         <button class="lang-btn active" id="lang-fr" onclick="setLang('fr')">FR</button>
@@ -153,6 +154,6 @@
   <div id="modal-container"></div>
   <div id="toast-container"></div>
 
-  <script src="widget.js?v=4"></script>
+  <script src="widget.js?v=5"></script>
 </body>
 </html>
