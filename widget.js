@@ -478,7 +478,112 @@ async function saveRisk(id) {
   if (!rec.Title) { showToast(currentLang === 'fr' ? 'Titre requis' : 'Title required', 'error'); return; }
   await saveRow(T.RISK, id, rec);
 }
-function renderGovernance() { placeholder('view-governance', '👥', t('tabGovernance')); }
+function renderGovernance() {
+  var L = currentLang === 'fr';
+  var html = '';
+
+  // --- RACI ---
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>📌 ' + (L ? 'Matrice RACI' : 'RACI matrix') + ' <span class="section-subtitle">R=Réalise · A=Autorité · C=Consulté · I=Informé</span></span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openRaciModal()">+ ' + (L ? 'Activité' : 'Activity') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.raci.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Activité' : 'Activity') + '</th><th>R</th><th>A</th><th>C</th><th>I</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.raci.slice().sort(function(a, b) { return (a.Order || 0) - (b.Order || 0); }).forEach(function(r) {
+      html += '<tr><td><strong>' + sanitize(r.Activity || '') + '</strong></td><td>' + sanitize(r.R || '') + '</td><td>' + sanitize(r.A || '') + '</td><td>' + sanitize(r.C || '') + '</td><td>' + sanitize(r.I || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openRaciModal(' + r.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.RACI + '\',' + r.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // --- Instances ---
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>🏛️ ' + (L ? 'Instances de gouvernance' : 'Governance bodies') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openInstModal()">+ ' + (L ? 'Instance' : 'Body') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.inst.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Instance' : 'Body') + '</th><th>' + (L ? 'Composition' : 'Composition') + '</th><th>' + (L ? 'Fréquence' : 'Frequency') + '</th><th>' + (L ? 'Prochaine' : 'Next') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.inst.forEach(function(i) {
+      html += '<tr><td><strong>' + sanitize(i.Name || '') + '</strong></td><td>' + sanitize(i.Composition || '') + '</td><td>' + sanitize(i.Frequency || '') + '</td><td>' + (i.Next_Date ? formatDate(i.Next_Date) : '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openInstModal(' + i.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.INST + '\',' + i.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  // --- Décisions / actions ---
+  html += '<div class="section-card"><div class="section-title" style="justify-content:space-between;"><span>✅ ' + (L ? 'Relevé de décisions & actions' : 'Decisions & actions log') + '</span>';
+  if (canEdit) html += '<button class="btn btn-primary btn-sm" onclick="openDecModal()">+ ' + (L ? 'Décision' : 'Decision') + '</button></span></div>';
+  else html += '</span></div>';
+  if (!data.dec.length) html += '<div class="empty-hint">' + t('noData') + '</div>';
+  else {
+    html += '<table class="data-table"><thead><tr><th>' + (L ? 'Date' : 'Date') + '</th><th>' + (L ? 'Instance' : 'Body') + '</th><th>' + (L ? 'Décision / action' : 'Decision / action') + '</th><th>' + (L ? 'Responsable' : 'Owner') + '</th><th>' + (L ? 'Échéance' : 'Due') + '</th><th>' + (L ? 'Statut' : 'Status') + '</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.dec.slice().sort(function(a, b) { return (b.Date || 0) - (a.Date || 0); }).forEach(function(d) {
+      var overdue = d.Due_Date && d.Status !== 'close' && d.Due_Date < Math.floor(Date.now() / 1000);
+      html += '<tr><td>' + (d.Date ? formatDate(d.Date) : '') + '</td><td>' + sanitize(d.Instance || '') + '</td>';
+      html += '<td><strong>' + sanitize(d.Decision || '') + '</strong>' + (d.Action ? '<div style="font-size:11px;color:#64748b;">→ ' + sanitize(d.Action) + '</div>' : '') + '</td>';
+      html += '<td>' + sanitize(d.Responsible || '') + '</td><td style="' + (overdue ? 'color:#ef4444;font-weight:700;' : '') + '">' + (d.Due_Date ? formatDate(d.Due_Date) + (overdue ? ' ⚠️' : '') : '') + '</td><td>' + sanitize(d.Status || '') + '</td>';
+      if (canEdit) html += '<td><button class="btn-icon" onclick="openDecModal(' + d.id + ')">✏️</button><button class="btn-icon" onclick="deleteRow(\'' + T.DEC + '\',' + d.id + ')">🗑️</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  document.getElementById('view-governance').innerHTML = html;
+}
+function openRaciModal(id) {
+  if (!canEdit) return;
+  var r = id ? data.raci.find(function(x) { return x.id === id; }) : {};
+  var b = '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Activité' : 'Activity') + '</label><input id="ra-act" value="' + sanitize(r.Activity || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>R (Réalise)</label><input id="ra-r" value="' + sanitize(r.R || '') + '"></div><div class="form-group"><label>A (Autorité)</label><input id="ra-a" value="' + sanitize(r.A || '') + '"></div></div>';
+  b += '<div class="form-row"><div class="form-group"><label>C (Consulté)</label><input id="ra-c" value="' + sanitize(r.C || '') + '"></div><div class="form-group"><label>I (Informé)</label><input id="ra-i" value="' + sanitize(r.I || '') + '"></div></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.RACI + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveRaci(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal('RACI', b, f);
+}
+async function saveRaci(id) {
+  var rec = { Activity: document.getElementById('ra-act').value.trim(), R: document.getElementById('ra-r').value.trim(), A: document.getElementById('ra-a').value.trim(), C: document.getElementById('ra-c').value.trim(), I: document.getElementById('ra-i').value.trim() };
+  if (!rec.Activity) { showToast(currentLang === 'fr' ? 'Activité requise' : 'Activity required', 'error'); return; }
+  await saveRow(T.RACI, id, rec);
+}
+function openInstModal(id) {
+  if (!canEdit) return;
+  var i = id ? data.inst.find(function(x) { return x.id === id; }) : {};
+  var b = '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Instance' : 'Body') + '</label><input id="in-name" value="' + sanitize(i.Name || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Composition' : 'Composition') + '</label><input id="in-comp" value="' + sanitize(i.Composition || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Fréquence' : 'Frequency') + '</label><input id="in-freq" value="' + sanitize(i.Frequency || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Prochaine date' : 'Next date') + '</label><input type="date" id="in-next" value="' + fromEpoch(i.Next_Date) + '"></div></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Rôle' : 'Role') + '</label><input id="in-role" value="' + sanitize(i.Role || '') + '"></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.INST + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveInst(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(currentLang === 'fr' ? 'Instance' : 'Body', b, f);
+}
+async function saveInst(id) {
+  var rec = { Name: document.getElementById('in-name').value.trim(), Composition: document.getElementById('in-comp').value.trim(), Frequency: document.getElementById('in-freq').value.trim(), Next_Date: toEpoch(document.getElementById('in-next').value), Role: document.getElementById('in-role').value.trim() };
+  if (!rec.Name) { showToast(currentLang === 'fr' ? 'Nom requis' : 'Name required', 'error'); return; }
+  await saveRow(T.INST, id, rec);
+}
+function openDecModal(id) {
+  if (!canEdit) return;
+  var d = id ? data.dec.find(function(x) { return x.id === id; }) : { Status: 'ouverte', Date: Math.floor(Date.now() / 1000) };
+  var statuses = ['ouverte', 'en cours', 'close'];
+  var instOpts = '<option value=""></option>' + data.inst.map(function(i) { return '<option' + (d.Instance === i.Name ? ' selected' : '') + '>' + sanitize(i.Name) + '</option>'; }).join('');
+  var b = '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Date' : 'Date') + '</label><input type="date" id="de-date" value="' + fromEpoch(d.Date) + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Instance' : 'Body') + '</label><select id="de-inst">' + instOpts + '</select></div></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Décision' : 'Decision') + '</label><textarea id="de-dec" rows="2">' + sanitize(d.Decision || '') + '</textarea></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Action associée' : 'Associated action') + '</label><input id="de-action" value="' + sanitize(d.Action || '') + '"></div>';
+  b += '<div class="form-row"><div class="form-group"><label>' + (currentLang === 'fr' ? 'Responsable' : 'Owner') + '</label><input id="de-resp" value="' + sanitize(d.Responsible || '') + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Échéance' : 'Due') + '</label><input type="date" id="de-due" value="' + fromEpoch(d.Due_Date) + '"></div>';
+  b += '<div class="form-group"><label>' + (currentLang === 'fr' ? 'Statut' : 'Status') + '</label><select id="de-status">' + statuses.map(function(s) { return '<option' + (d.Status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>';
+  var f = (id ? '<button class="btn btn-danger" onclick="deleteRow(\'' + T.DEC + '\',' + id + ')">🗑️</button>' : '') + '<button class="btn btn-secondary" onclick="closeModalForce()">' + t('cancel') + '</button><button class="btn btn-primary" onclick="saveDec(' + (id || 'null') + ')">💾 ' + t('save') + '</button>';
+  openModal(currentLang === 'fr' ? 'Décision / action' : 'Decision / action', b, f);
+}
+async function saveDec(id) {
+  var rec = { Date: toEpoch(document.getElementById('de-date').value), Instance: document.getElementById('de-inst').value, Decision: document.getElementById('de-dec').value.trim(), Action: document.getElementById('de-action').value.trim(), Responsible: document.getElementById('de-resp').value.trim(), Due_Date: toEpoch(document.getElementById('de-due').value), Status: document.getElementById('de-status').value };
+  if (!rec.Decision) { showToast(currentLang === 'fr' ? 'Décision requise' : 'Decision required', 'error'); return; }
+  await saveRow(T.DEC, id, rec);
+}
 function renderData() { placeholder('view-data', '🧬', t('tabData')); }
 function renderTraining() { placeholder('view-training', '🎓', t('tabTraining')); }
 function renderProcesses() { placeholder('view-processes', '🔄', t('tabProcesses')); }
